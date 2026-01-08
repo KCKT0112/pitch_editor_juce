@@ -4,6 +4,7 @@
 #include "../Models/Project.h"
 #include "../Audio/AudioEngine.h"
 #include "../Audio/PitchDetector.h"
+#include "../Audio/FCPEPitchDetector.h"
 #include "../Audio/Vocoder.h"
 #include "ToolbarComponent.h"
 #include "PianoRollComponent.h"
@@ -45,8 +46,11 @@ private:
     
     std::unique_ptr<Project> project;
     std::unique_ptr<AudioEngine> audioEngine;
-    std::unique_ptr<PitchDetector> pitchDetector;
+    std::unique_ptr<PitchDetector> pitchDetector;  // Fallback YIN detector
+    std::unique_ptr<FCPEPitchDetector> fcpePitchDetector;  // FCPE neural network detector
     std::unique_ptr<Vocoder> vocoder;
+    
+    bool useFCPE = true;  // Use FCPE by default if available
     
     ToolbarComponent toolbar;
     PianoRollComponent pianoRoll;

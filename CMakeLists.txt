@@ -64,6 +64,8 @@ target_sources(PitchEditor PRIVATE
     Source/Audio/Vocoder.h
     Source/Audio/PitchDetector.cpp
     Source/Audio/PitchDetector.h
+    Source/Audio/FCPEPitchDetector.cpp
+    Source/Audio/FCPEPitchDetector.h
     Source/UI/MainComponent.cpp
     Source/UI/MainComponent.h
     Source/UI/PianoRollComponent.cpp
@@ -162,4 +164,34 @@ if(EXISTS ${ONNX_MODEL_PATH})
         "$<TARGET_FILE_DIR:PitchEditor>/models/pc_nsf_hifigan.onnx")
 else()
     message(WARNING "ONNX model not found at ${ONNX_MODEL_PATH}")
+endif()
+
+# FCPE model and resources
+set(FCPE_MODEL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/models/fcpe.onnx")
+set(FCPE_MEL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/models/mel_filterbank.bin")
+set(FCPE_CENT_PATH "${CMAKE_CURRENT_SOURCE_DIR}/models/cent_table.bin")
+
+if(EXISTS ${FCPE_MODEL_PATH})
+    message(STATUS "Found FCPE model: ${FCPE_MODEL_PATH}")
+    add_custom_command(TARGET PitchEditor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:PitchEditor>/models"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${FCPE_MODEL_PATH}"
+        "$<TARGET_FILE_DIR:PitchEditor>/models/fcpe.onnx")
+else()
+    message(WARNING "FCPE model not found at ${FCPE_MODEL_PATH}")
+endif()
+
+if(EXISTS ${FCPE_MEL_PATH})
+    add_custom_command(TARGET PitchEditor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${FCPE_MEL_PATH}"
+        "$<TARGET_FILE_DIR:PitchEditor>/models/mel_filterbank.bin")
+endif()
+
+if(EXISTS ${FCPE_CENT_PATH})
+    add_custom_command(TARGET PitchEditor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${FCPE_CENT_PATH}"
+        "$<TARGET_FILE_DIR:PitchEditor>/models/cent_table.bin")
 endif()

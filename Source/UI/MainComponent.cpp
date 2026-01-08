@@ -10,7 +10,37 @@ MainComponent::MainComponent()
     project = std::make_unique<Project>();
     audioEngine = std::make_unique<AudioEngine>();
     pitchDetector = std::make_unique<PitchDetector>();
+    fcpePitchDetector = std::make_unique<FCPEPitchDetector>();
     vocoder = std::make_unique<Vocoder>();
+    
+    // Try to load FCPE model
+    auto modelsDir = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+                        .getParentDirectory()
+                        .getChildFile("models");
+    
+    auto fcpeModelPath = modelsDir.getChildFile("fcpe.onnx");
+    auto melFilterbankPath = modelsDir.getChildFile("mel_filterbank.bin");
+    auto centTablePath = modelsDir.getChildFile("cent_table.bin");
+    
+    if (fcpeModelPath.existsAsFile())
+    {
+        if (fcpePitchDetector->loadModel(fcpeModelPath, melFilterbankPath, centTablePath))
+        {
+            DBG("FCPE pitch detector loaded successfully");
+            useFCPE = true;
+        }
+        else
+        {
+            DBG("Failed to load FCPE model, falling back to YIN");
+            useFCPE = false;
+        }
+    }
+    else
+    {
+        DBG("FCPE model not found at: " + fcpeModelPath.getFullPathName());
+        DBG("Using YIN pitch detector as fallback");
+        useFCPE = false;
+    }
     
     // Load vocoder settings
     applySettings();
@@ -233,9 +263,26 @@ void MainComponent::analyzeAudio()
     const float* samples = audioData.waveform.getReadPointer(0);
     int numSamples = audioData.waveform.getNumSamples();
     
-    auto [f0Values, voicedValues] = pitchDetector->extractF0(samples, numSamples);
-    audioData.f0 = std::move(f0Values);
-    audioData.voicedMask = std::move(voicedValues);
+    // Use FCPE if available, otherwise fall back to YIN
+    if (useFCPE && fcpePitchDetector && fcpePitchDetector->isLoaded())
+    {
+        DBG("Using FCPE for pitch detection");
+        audioData.f0 = fcpePitchDetector->extractF0(samples, numSamples, SAMPLE_RATE);
+        
+        // Create voiced mask (non-zero F0 = voiced)
+        audioData.voicedMask.resize(audioData.f0.size());
+        for (size_t i = 0; i < audioData.f0.size(); ++i)
+        {
+            audioData.voicedMask[i] = audioData.f0[i] > 0;
+        }
+    }
+    else
+    {
+        DBG("Using YIN for pitch detection (fallback)");
+        auto [f0Values, voicedValues] = pitchDetector->extractF0(samples, numSamples);
+        audioData.f0 = std::move(f0Values);
+        audioData.voicedMask = std::move(voicedValues);
+    }
     
     // Compute mel spectrogram
     MelSpectrogram melComputer(SAMPLE_RATE, N_FFT, HOP_SIZE, NUM_MELS, FMIN, FMAX);
