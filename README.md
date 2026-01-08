@@ -1,4 +1,4 @@
-<div style="text-align: center;">
+<div align="center">
   <h1> ♥ 大市修 ♥ <br/> PC-NSF-HifiGAN Pitch Editor </h1>
 
   <img src="logo.jpg" alt="Logo" width="300" />
