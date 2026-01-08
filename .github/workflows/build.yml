@@ -55,8 +55,7 @@ jobs:
     - name: Package
       run: |
         New-Item -ItemType Directory -Force -Path package/PitchEditor-Windows-CPU
-        $exePath = Get-ChildItem -Path build -Recurse -Filter "PitchEditor.exe" | Select-Object -First 1
-        Copy-Item $exePath.FullName -Destination package/PitchEditor-Windows-CPU/
+        Copy-Item "build/PitchEditor_artefacts/Release/Pitch Editor.exe" -Destination "package/PitchEditor-Windows-CPU/PitchEditor.exe"
         Copy-Item onnxruntime/lib/onnxruntime.dll -Destination package/PitchEditor-Windows-CPU/
         Copy-Item -Recurse models -Destination package/PitchEditor-Windows-CPU/
         Compress-Archive -Path package/PitchEditor-Windows-CPU -DestinationPath PitchEditor-Windows-CPU.zip
@@ -121,8 +120,7 @@ jobs:
     - name: Package
       run: |
         New-Item -ItemType Directory -Force -Path package/PitchEditor-Windows-DirectML
-        $exePath = Get-ChildItem -Path build -Recurse -Filter "PitchEditor.exe" | Select-Object -First 1
-        Copy-Item $exePath.FullName -Destination package/PitchEditor-Windows-DirectML/
+        Copy-Item "build/PitchEditor_artefacts/Release/Pitch Editor.exe" -Destination "package/PitchEditor-Windows-DirectML/PitchEditor.exe"
         Copy-Item onnxruntime/lib/onnxruntime.dll -Destination package/PitchEditor-Windows-DirectML/
         Copy-Item onnxruntime/lib/DirectML.dll -Destination package/PitchEditor-Windows-DirectML/
         Copy-Item -Recurse models -Destination package/PitchEditor-Windows-DirectML/
