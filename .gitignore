@@ -1,0 +1,33 @@
+# Build directories
+build/
+cmake-build-*/
+
+# JUCE (should be cloned locally)
+JUCE/
+
+# IDE files
+.vs/
+.vscode/
+*.user
+*.suo
+*.sdf
+*.opensdf
+*.vcxproj.user
+
+# macOS
+.DS_Store
+*.xcodeproj/
+*.xcworkspace/
+
+# Compiled files
+*.o
+*.obj
+*.exe
+*.dll
+*.dylib
+*.so
+*.a
+
+# Temporary files
+*.tmp
+*.log
