@@ -422,6 +422,8 @@ void MainComponent::loadAudioFile(const juce::File& file)
 
     loaderThread = std::thread([this, file]()
     {
+        juce::Component::SafePointer<MainComponent> safeThis(this);
+
         auto updateProgress = [this](double p, const juce::String& msg)
         {
             loadingProgress = juce::jlimit(0.0, 1.0, p);
@@ -437,9 +439,10 @@ void MainComponent::loadAudioFile(const juce::File& file)
         std::unique_ptr<juce::AudioFormatReader> reader(formatManager.createReaderFor(file));
         if (reader == nullptr || cancelLoading.load())
         {
-            juce::MessageManager::callAsync([this]()
+            juce::MessageManager::callAsync([safeThis]()
             {
-                isLoadingAudio = false;
+                if (safeThis != nullptr)
+                    safeThis->isLoadingAudio = false;
             });
             return;
         }
@@ -470,7 +473,11 @@ void MainComponent::loadAudioFile(const juce::File& file)
 
         if (cancelLoading.load())
         {
-            juce::MessageManager::callAsync([this]() { isLoadingAudio = false; });
+            juce::MessageManager::callAsync([safeThis]()
+            {
+                if (safeThis != nullptr)
+                    safeThis->isLoadingAudio = false;
+            });
             return;
         }
 
@@ -501,7 +508,7 @@ void MainComponent::loadAudioFile(const juce::File& file)
         }
 
         updateProgress(0.22, "Preparing project...");
-        auto newProject = std::make_unique<Project>();
+        auto newProject = std::make_shared<Project>();
         newProject->setFilePath(file);
         auto& audioData = newProject->getAudioData();
         audioData.waveform = std::move(buffer);
@@ -509,7 +516,11 @@ void MainComponent::loadAudioFile(const juce::File& file)
 
         if (cancelLoading.load())
         {
-            juce::MessageManager::callAsync([this]() { isLoadingAudio = false; });
+            juce::MessageManager::callAsync([safeThis]()
+            {
+                if (safeThis != nullptr)
+                    safeThis->isLoadingAudio = false;
+            });
             return;
         }
 
@@ -518,32 +529,40 @@ void MainComponent::loadAudioFile(const juce::File& file)
 
         if (cancelLoading.load())
         {
-            juce::MessageManager::callAsync([this]() { isLoadingAudio = false; });
+            juce::MessageManager::callAsync([safeThis]()
+            {
+                if (safeThis != nullptr)
+                    safeThis->isLoadingAudio = false;
+            });
             return;
         }
 
         updateProgress(0.95, "Finalizing...");
 
-        juce::MessageManager::callAsync([this, proj = std::move(newProject)]() mutable
+        juce::MessageManager::callAsync([safeThis, newProject]() mutable
         {
-            project = std::move(proj);
+            if (safeThis == nullptr)
+                return;
+
+            safeThis->project = std::make_unique<Project>(std::move(*newProject));
 
             // Update UI
-            pianoRoll.setProject(project.get());
-            waveform.setProject(project.get());
-            parameterPanel.setProject(project.get());
-            toolbar.setTotalTime(project->getAudioData().getDuration());
+            safeThis->pianoRoll.setProject(safeThis->project.get());
+            safeThis->waveform.setProject(safeThis->project.get());
+            safeThis->parameterPanel.setProject(safeThis->project.get());
+            safeThis->toolbar.setTotalTime(safeThis->project->getAudioData().getDuration());
 
             // Set audio to engine
-            auto& audioData = project->getAudioData();
-            audioEngine->loadWaveform(audioData.waveform, audioData.sampleRate);
+            auto& audioData = safeThis->project->getAudioData();
+            if (safeThis->audioEngine)
+                safeThis->audioEngine->loadWaveform(audioData.waveform, audioData.sampleRate);
 
             // Save original waveform for incremental synthesis
-            originalWaveform.makeCopyOf(audioData.waveform);
-            hasOriginalWaveform = true;
+            safeThis->originalWaveform.makeCopyOf(audioData.waveform);
+            safeThis->hasOriginalWaveform = true;
 
-            repaint();
-            isLoadingAudio = false;
+            safeThis->repaint();
+            safeThis->isLoadingAudio = false;
         });
     });
 }
