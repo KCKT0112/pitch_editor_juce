@@ -99,7 +99,9 @@ void FCPEPitchDetector::initCentTable()
 
 bool FCPEPitchDetector::loadModel(const juce::File& modelPath,
                                    const juce::File& melFilterbankPath,
-                                   const juce::File& centTablePath)
+                                   const juce::File& centTablePath,
+                                   GPUProvider provider,
+                                   int deviceId)
 {
 #ifdef HAVE_ONNXRUNTIME
     try
@@ -113,7 +115,7 @@ bool FCPEPitchDetector::loadModel(const juce::File& modelPath,
                 const int numBins = N_FFT / 2 + 1;
                 std::vector<float> data(N_MELS * numBins);
                 stream.read(data.data(), data.size() * sizeof(float));
-                
+
                 melFilterbank.resize(N_MELS);
                 for (int m = 0; m < N_MELS; ++m)
                 {
@@ -126,7 +128,7 @@ bool FCPEPitchDetector::loadModel(const juce::File& modelPath,
                 DBG("Loaded mel filterbank from file");
             }
         }
-        
+
         // Load cent table from file if provided
         if (centTablePath.existsAsFile())
         {
@@ -138,14 +140,39 @@ bool FCPEPitchDetector::loadModel(const juce::File& modelPath,
                 DBG("Loaded cent table from file");
             }
         }
-        
+
         // Initialize ONNX Runtime
         onnxEnv = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "FCPEPitchDetector");
-        
+
         Ort::SessionOptions sessionOptions;
         sessionOptions.SetIntraOpNumThreads(1);
         sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-        
+
+        // Configure execution provider based on GPU settings
+#ifdef _WIN32
+        if (provider == GPUProvider::DirectML)
+        {
+            // DirectML for Windows (AMD/Intel/NVIDIA)
+            OrtSessionOptionsAppendExecutionProvider_DML(sessionOptions, deviceId);
+            DBG("Using DirectML execution provider, device: " << deviceId);
+        }
+        else if (provider == GPUProvider::CUDA)
+        {
+            OrtCUDAProviderOptions cudaOptions;
+            cudaOptions.device_id = deviceId;
+            sessionOptions.AppendExecutionProvider_CUDA(cudaOptions);
+            DBG("Using CUDA execution provider, device: " << deviceId);
+        }
+#else
+        if (provider == GPUProvider::CUDA)
+        {
+            OrtCUDAProviderOptions cudaOptions;
+            cudaOptions.device_id = deviceId;
+            sessionOptions.AppendExecutionProvider_CUDA(cudaOptions);
+            DBG("Using CUDA execution provider, device: " << deviceId);
+        }
+#endif
+
 #ifdef _WIN32
         std::wstring modelPathW = modelPath.getFullPathName().toWideCharPointer();
         onnxSession = std::make_unique<Ort::Session>(*onnxEnv, modelPathW.c_str(), sessionOptions);
@@ -153,7 +180,7 @@ bool FCPEPitchDetector::loadModel(const juce::File& modelPath,
         std::string modelPathStr = modelPath.getFullPathName().toStdString();
         onnxSession = std::make_unique<Ort::Session>(*onnxEnv, modelPathStr.c_str(), sessionOptions);
 #endif
-        
+
         allocator = std::make_unique<Ort::AllocatorWithDefaultOptions>();
         
         // Get input/output names

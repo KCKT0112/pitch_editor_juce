@@ -1,5 +1,6 @@
 #include "Vocoder.h"
 #include "../Utils/Constants.h"
+#include "../Utils/PlatformPaths.h"
 #include <cmath>
 #include <thread>
 #include <algorithm>
@@ -9,9 +10,8 @@
 
 Vocoder::Vocoder()
 {
-    // Open log file in executable directory
-    auto exePath = juce::File::getSpecialLocation(juce::File::currentExecutableFile);
-    auto logPath = exePath.getParentDirectory().getChildFile("vocoder_log.txt");
+    // Open log file in platform-appropriate logs directory
+    auto logPath = PlatformPaths::getLogFile("vocoder_log.txt");
     logFile = std::make_unique<std::ofstream>(logPath.getFullPathName().toStdString(), std::ios::app);
     
     if (logFile && logFile->is_open())
@@ -463,27 +463,26 @@ bool Vocoder::reloadModel()
 Ort::SessionOptions Vocoder::createSessionOptions()
 {
     Ort::SessionOptions sessionOptions;
-    
-    // Set thread count
-    int numThreads = inferenceThreads;
-    if (numThreads <= 0)
+
+    // Set thread count (0 = let onnxruntime decide)
+    if (inferenceThreads > 0)
     {
-        numThreads = std::thread::hardware_concurrency();
+        sessionOptions.SetIntraOpNumThreads(inferenceThreads);
+        sessionOptions.SetInterOpNumThreads(inferenceThreads);
     }
-    sessionOptions.SetIntraOpNumThreads(numThreads);
-    sessionOptions.SetInterOpNumThreads(numThreads);
-    
+    // When inferenceThreads == 0, don't set - let onnxruntime use its default
+
     // Enable all optimizations
     sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
-    
+
     // Enable memory pattern optimization
     sessionOptions.EnableMemPattern();
-    
+
     // Enable CPU memory arena
     sessionOptions.EnableCpuMemArena();
-    
-    log("Creating session with device: " + executionDevice.toStdString() + 
-        ", threads: " + std::to_string(numThreads));
+
+    log("Creating session with device: " + executionDevice.toStdString() +
+        ", threads: " + (inferenceThreads > 0 ? std::to_string(inferenceThreads) : "auto"));
     
     // Add execution provider based on device selection
     if (executionDevice == "CUDA")

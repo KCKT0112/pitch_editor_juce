@@ -5,6 +5,9 @@
 #include "../UI/MainComponent.h"
 
 class PitchEditorAudioProcessorEditor : public juce::AudioProcessorEditor
+#if JucePlugin_Enable_ARA
+                                       , public juce::AudioProcessorEditorARAExtension
+#endif
 {
 public:
     explicit PitchEditorAudioProcessorEditor (PitchEditorAudioProcessor&);

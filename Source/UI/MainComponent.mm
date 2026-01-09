@@ -1,40 +1,12 @@
 #include "MainComponent.h"
 #include "../Utils/Constants.h"
 #include "../Utils/MelSpectrogram.h"
+#include "../Utils/PlatformPaths.h"
+#include "../Utils/Localization.h"
 
-#if JUCE_WINDOWS
- #ifndef NOMINMAX
-  #define NOMINMAX
- #endif
- #ifndef WIN32_LEAN_AND_MEAN
-  #define WIN32_LEAN_AND_MEAN
- #endif
- #include <windows.h>
-#elif JUCE_MAC || JUCE_LINUX || JUCE_BSD
- #include <dlfcn.h>
+#if JUCE_MAC
+#include <Cocoa/Cocoa.h>
 #endif
-
-static juce::File getRuntimeBinaryDir()
-{
-#if defined(JucePlugin_Build_VST3) || defined(JucePlugin_Build_AU) || defined(JucePlugin_Build_AUv3) || defined(JucePlugin_Build_LV2)
-   #if JUCE_WINDOWS
-    HMODULE moduleHandle = nullptr;
-    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-                       reinterpret_cast<LPCWSTR>(&getRuntimeBinaryDir),
-                       &moduleHandle);
-
-    wchar_t path[MAX_PATH]{};
-    if (moduleHandle != nullptr && GetModuleFileNameW(moduleHandle, path, static_cast<DWORD>(sizeof(path) / sizeof(path[0]))) > 0)
-        return juce::File(juce::String(path)).getParentDirectory();
-   #elif JUCE_MAC || JUCE_LINUX || JUCE_BSD
-    Dl_info info{};
-    if (dladdr(reinterpret_cast<const void*>(&getRuntimeBinaryDir), &info) != 0 && info.dli_fname != nullptr)
-        return juce::File(juce::String(info.dli_fname)).getParentDirectory();
-   #endif
-#endif
-
-    return juce::File::getSpecialLocation(juce::File::currentExecutableFile).getParentDirectory();
-}
 
 MainComponent::MainComponent(bool enableAudioDevice)
     : enableAudioDeviceFlag(enableAudioDevice)
@@ -54,8 +26,8 @@ MainComponent::MainComponent(bool enableAudioDevice)
     
     DBG("MainComponent: Looking for FCPE model...");
     // Try to load FCPE model
-    auto modelsDir = getRuntimeBinaryDir().getChildFile("models");
-    
+    auto modelsDir = PlatformPaths::getModelsDirectory();
+
     auto fcpeModelPath = modelsDir.getChildFile("fcpe.onnx");
     auto melFilterbankPath = modelsDir.getChildFile("mel_filterbank.bin");
     auto centTablePath = modelsDir.getChildFile("cent_table.bin");
@@ -90,39 +62,50 @@ MainComponent::MainComponent(bool enableAudioDevice)
     
     DBG("MainComponent: Adding child components...");
     // Add child components
+#if JUCE_MAC
+    // Use native macOS menu bar (only in standalone mode)
+    if (!isPluginMode())
+        juce::MenuBarModel::setMacMainMenu(this);
+#else
+    addAndMakeVisible(titleBar);
+    menuBar.setModel(this);
+    addAndMakeVisible(menuBar);
+#endif
     addAndMakeVisible(toolbar);
     addAndMakeVisible(pianoRoll);
-    addAndMakeVisible(waveform);
     addAndMakeVisible(parameterPanel);
+
+    // Configure toolbar for plugin mode
+    if (isPluginMode())
+        toolbar.setPluginMode(true);
     
     // Set undo manager for piano roll
     pianoRoll.setUndoManager(undoManager.get());
     
     DBG("MainComponent: Setting up callbacks...");
     // Setup toolbar callbacks
-    toolbar.onOpenFile = [this]() { openFile(); };
-    toolbar.onExportFile = [this]() { exportFile(); };
     toolbar.onPlay = [this]() { play(); };
     toolbar.onPause = [this]() { pause(); };
     toolbar.onStop = [this]() { stop(); };
-    toolbar.onResynthesize = [this]() { resynthesize(); };
-    toolbar.onSettings = [this]() { showSettings(); };
     toolbar.onZoomChanged = [this](float pps) { onZoomChanged(pps); };
     toolbar.onEditModeChanged = [this](EditMode mode) { setEditMode(mode); };
-    
+
+    // Plugin mode callbacks
+    toolbar.onReanalyze = [this]() {
+        if (onReanalyzeRequested)
+            onReanalyzeRequested();
+    };
+    toolbar.onRender = [this]() {
+        renderProcessedAudio();
+    };
+
     // Setup piano roll callbacks
     pianoRoll.onSeek = [this](double time) { seek(time); };
     pianoRoll.onNoteSelected = [this](Note* note) { onNoteSelected(note); };
     pianoRoll.onPitchEdited = [this]() { onPitchEdited(); };
     pianoRoll.onPitchEditFinished = [this]() { resynthesizeIncremental(); };
     pianoRoll.onZoomChanged = [this](float pps) { onZoomChanged(pps); };
-    pianoRoll.onScrollChanged = [this](double x) { onPianoRollScrollChanged(x); };
-    
-    // Setup waveform callbacks
-    waveform.onSeek = [this](double time) { seek(time); };
-    waveform.onZoomChanged = [this](float pps) { onZoomChanged(pps); };
-    waveform.onScrollChanged = [this](double x) { onScrollChanged(x); };
-    
+
     // Setup parameter panel callbacks
     parameterPanel.onParameterChanged = [this]() { onPitchEdited(); };
     parameterPanel.onParameterEditFinished = [this]() { resynthesizeIncremental(); };
@@ -140,8 +123,22 @@ MainComponent::MainComponent(bool enableAudioDevice)
             juce::MessageManager::callAsync([this, position]()
             {
                 pianoRoll.setCursorTime(position);
-                waveform.setCursorTime(position);
                 toolbar.setCurrentTime(position);
+
+                // Follow playback: scroll to keep cursor visible
+                if (isPlaying && toolbar.isFollowPlayback())
+                {
+                    float cursorX = static_cast<float>(position * pianoRoll.getPixelsPerSecond());
+                    float viewWidth = static_cast<float>(pianoRoll.getWidth() - 74);  // minus piano keys and scrollbar
+                    float scrollX = static_cast<float>(pianoRoll.getScrollX());
+
+                    // If cursor is outside visible area, scroll to center it
+                    if (cursorX < scrollX || cursorX > scrollX + viewWidth)
+                    {
+                        double newScrollX = std::max(0.0, static_cast<double>(cursorX - viewWidth * 0.3f));
+                        pianoRoll.setScrollX(newScrollX);
+                    }
+                }
             });
         });
         
@@ -157,7 +154,6 @@ MainComponent::MainComponent(bool enableAudioDevice)
     
     // Set initial project
     pianoRoll.setProject(project.get());
-    waveform.setProject(project.get());
     
     DBG("MainComponent: Adding keyboard listener...");
     // Add keyboard listener
@@ -178,6 +174,10 @@ MainComponent::MainComponent(bool enableAudioDevice)
 
 MainComponent::~MainComponent()
 {
+#if JUCE_MAC
+    juce::MenuBarModel::setMacMainMenu(nullptr);
+#endif
+
     if (enableAudioDeviceFlag)
         saveConfig();
     removeKeyListener(this);
@@ -194,23 +194,83 @@ MainComponent::~MainComponent()
 void MainComponent::paint(juce::Graphics& g)
 {
     g.fillAll(juce::Colour(COLOR_BACKGROUND));
+
+#if JUCE_MAC
+    // Paint the title bar area with toolbar color to match
+    g.setColour(juce::Colour(0xFF1A1A24));
+    g.fillRect(0, 0, getWidth(), 28);
+#endif
 }
 
 void MainComponent::resized()
 {
     auto bounds = getLocalBounds();
-    
+
+#if JUCE_MAC
+    // Leave space for native traffic lights (title bar area)
+    bounds.removeFromTop(28);
+#else
+    // Custom title bar at top (Windows/Linux only)
+    titleBar.setBounds(bounds.removeFromTop(CustomTitleBar::titleBarHeight));
+    // Menu bar below title bar
+    menuBar.setBounds(bounds.removeFromTop(24));
+#endif
+
     // Toolbar at top
     toolbar.setBounds(bounds.removeFromTop(40));
-    
+
     // Parameter panel on right
     parameterPanel.setBounds(bounds.removeFromRight(250));
-    
-    // Waveform at bottom
-    waveform.setBounds(bounds.removeFromBottom(120));
-    
+
     // Piano roll takes remaining space
     pianoRoll.setBounds(bounds);
+}
+
+void MainComponent::mouseDown(const juce::MouseEvent& e)
+{
+#if JUCE_MAC
+    // Allow dragging from the title bar area (top 28px)
+    if (e.y < 28)
+    {
+        if (auto* window = getTopLevelComponent())
+            dragger.startDraggingComponent(window, e.getEventRelativeTo(window));
+    }
+#else
+    juce::ignoreUnused(e);
+#endif
+}
+
+void MainComponent::mouseDrag(const juce::MouseEvent& e)
+{
+#if JUCE_MAC
+    if (e.y < 28 || e.mouseWasDraggedSinceMouseDown())
+    {
+        if (auto* window = getTopLevelComponent())
+            dragger.dragComponent(window, e.getEventRelativeTo(window), nullptr);
+    }
+#else
+    juce::ignoreUnused(e);
+#endif
+}
+
+void MainComponent::mouseDoubleClick(const juce::MouseEvent& e)
+{
+#if JUCE_MAC
+    if (e.y < 28)
+    {
+        // Use native zoom (maximize to screen) instead of fullscreen
+        if (auto* peer = getTopLevelComponent()->getPeer())
+        {
+            if (auto* nsView = (NSView*)peer->getNativeHandle())
+            {
+                if (auto* nsWindow = [nsView window])
+                    [nsWindow zoom:nil];
+            }
+        }
+    }
+#else
+    juce::ignoreUnused(e);
+#endif
 }
 
 void MainComponent::timerCallback()
@@ -254,16 +314,18 @@ bool MainComponent::keyPressed(const juce::KeyPress& key, juce::Component* /*ori
         return true;
     }
 
-    // Ctrl+Z: Undo
-    if (key == juce::KeyPress('z', juce::ModifierKeys::ctrlModifier, 0))
+    // Ctrl+Z or Cmd+Z: Undo
+    if (key == juce::KeyPress('z', juce::ModifierKeys::ctrlModifier, 0) ||
+        key == juce::KeyPress('z', juce::ModifierKeys::commandModifier, 0))
     {
         undo();
         return true;
     }
-    
-    // Ctrl+Y or Ctrl+Shift+Z: Redo
+
+    // Ctrl+Y or Ctrl+Shift+Z or Cmd+Shift+Z: Redo
     if (key == juce::KeyPress('y', juce::ModifierKeys::ctrlModifier, 0) ||
-        key == juce::KeyPress('z', juce::ModifierKeys::ctrlModifier | juce::ModifierKeys::shiftModifier, 0))
+        key == juce::KeyPress('z', juce::ModifierKeys::ctrlModifier | juce::ModifierKeys::shiftModifier, 0) ||
+        key == juce::KeyPress('z', juce::ModifierKeys::commandModifier | juce::ModifierKeys::shiftModifier, 0))
     {
         redo();
         return true;
@@ -548,7 +610,6 @@ void MainComponent::loadAudioFile(const juce::File& file)
 
             // Update UI
             safeThis->pianoRoll.setProject(safeThis->project.get());
-            safeThis->waveform.setProject(safeThis->project.get());
             safeThis->parameterPanel.setProject(safeThis->project.get());
             safeThis->toolbar.setTotalTime(safeThis->project->getAudioData().getDuration());
 
@@ -560,6 +621,27 @@ void MainComponent::loadAudioFile(const juce::File& file)
             // Save original waveform for incremental synthesis
             safeThis->originalWaveform.makeCopyOf(audioData.waveform);
             safeThis->hasOriginalWaveform = true;
+
+            // Center view on detected pitch range
+            const auto& f0 = audioData.f0;
+            if (!f0.empty())
+            {
+                float minF0 = 10000.0f, maxF0 = 0.0f;
+                for (float freq : f0)
+                {
+                    if (freq > 50.0f)  // Valid pitch
+                    {
+                        minF0 = std::min(minF0, freq);
+                        maxF0 = std::max(maxF0, freq);
+                    }
+                }
+                if (maxF0 > minF0)
+                {
+                    float minMidi = freqToMidi(minF0) - 2.0f;  // Add margin
+                    float maxMidi = freqToMidi(maxF0) + 2.0f;
+                    safeThis->pianoRoll.centerOnPitchRange(minMidi, maxMidi);
+                }
+            }
 
             safeThis->repaint();
             safeThis->isLoadingAudio = false;
@@ -676,8 +758,7 @@ void MainComponent::analyzeAudio(Project& targetProject, const std::function<voi
     
     onProgress(0.75, "Loading vocoder...");
     // Load vocoder model
-    auto modelPath = getRuntimeBinaryDir()
-                        .getChildFile("models")
+    auto modelPath = PlatformPaths::getModelsDirectory()
                         .getChildFile("pc_nsf_hifigan.onnx");
     
     if (modelPath.existsAsFile() && !vocoder->isLoaded())
@@ -776,9 +857,8 @@ void MainComponent::stop()
     isPlaying = false;
     toolbar.setPlaying(false);
     audioEngine->stop();
-    
+
     pianoRoll.setCursorTime(0.0);
-    waveform.setCursorTime(0.0);
     toolbar.setCurrentTime(0.0);
 }
 
@@ -787,118 +867,36 @@ void MainComponent::seek(double time)
     if (!audioEngine) return;
     audioEngine->seek(time);
     pianoRoll.setCursorTime(time);
-    waveform.setCursorTime(time);
     toolbar.setCurrentTime(time);
-}
-
-void MainComponent::resynthesize()
-{
-    if (!project) 
-    {
-        juce::AlertWindow::showMessageBoxAsync(
-            juce::AlertWindow::WarningIcon,
-            "Resynthesize",
-            "No project loaded.");
-        return;
-    }
-    
-    auto& audioData = project->getAudioData();
-    if (audioData.melSpectrogram.empty() || audioData.f0.empty())
-    {
-        juce::AlertWindow::showMessageBoxAsync(
-            juce::AlertWindow::WarningIcon,
-            "Resynthesize",
-            "No mel spectrogram or F0 data. Please load an audio file first.");
-        DBG("Cannot resynthesize: no mel spectrogram or F0 data");
-        DBG("  melSpectrogram size: " << audioData.melSpectrogram.size());
-        DBG("  f0 size: " << audioData.f0.size());
-        return;
-    }
-    
-    if (!vocoder->isLoaded())
-    {
-        juce::AlertWindow::showMessageBoxAsync(
-            juce::AlertWindow::WarningIcon,
-            "Resynthesize",
-            "Vocoder model not loaded. Check if models/pc_nsf_hifigan.onnx exists.");
-        DBG("Cannot resynthesize: vocoder not loaded");
-        return;
-    }
-    
-    DBG("Starting resynthesis...");
-    DBG("  Mel frames: " << audioData.melSpectrogram.size());
-    DBG("  F0 frames: " << audioData.f0.size());
-    
-    // Show progress indicator
-    toolbar.setEnabled(false);
-    parameterPanel.setLoadingStatus("Synthesizing...");
-    
-    // Get adjusted F0
-    std::vector<float> adjustedF0 = project->getAdjustedF0();
-    
-    DBG("  Adjusted F0 frames: " << adjustedF0.size());
-    
-    // Run vocoder inference asynchronously
-    vocoder->inferAsync(audioData.melSpectrogram, adjustedF0, 
-        [this](std::vector<float> synthesizedAudio)
-        {
-            // Re-enable toolbar
-            toolbar.setEnabled(true);
-            parameterPanel.clearLoadingStatus();
-            
-            if (synthesizedAudio.empty())
-            {
-                DBG("Resynthesis failed: empty output");
-                juce::AlertWindow::showMessageBoxAsync(
-                    juce::AlertWindow::WarningIcon,
-                    "Resynthesize",
-                    "Synthesis failed - empty output from vocoder.");
-                return;
-            }
-            
-            DBG("Resynthesis complete: " << synthesizedAudio.size() << " samples");
-            
-            // Create audio buffer from synthesized audio
-            juce::AudioBuffer<float> newBuffer(1, static_cast<int>(synthesizedAudio.size()));
-            float* dst = newBuffer.getWritePointer(0);
-            std::copy(synthesizedAudio.begin(), synthesizedAudio.end(), dst);
-            
-            // Update project audio data
-            auto& audioData = project->getAudioData();
-            audioData.waveform = std::move(newBuffer);
-            
-            // Reload waveform in audio engine
-            audioEngine->loadWaveform(audioData.waveform, audioData.sampleRate);
-            
-            // Update UI
-            waveform.repaint();
-            
-            DBG("Resynthesis applied to project");
-            
-            juce::AlertWindow::showMessageBoxAsync(
-                juce::AlertWindow::InfoIcon,
-                "Resynthesize",
-                "Synthesis complete! " + juce::String(synthesizedAudio.size()) + " samples generated.");
-                
-            // Clear dirty flags after full resynthesis
-            project->clearAllDirty();
-        });
 }
 
 void MainComponent::resynthesizeIncremental()
 {
-    if (!project) return;
-    
+    DBG("resynthesizeIncremental called");
+
+    if (!project) {
+        DBG("No project");
+        return;
+    }
+
     auto& audioData = project->getAudioData();
-    if (audioData.melSpectrogram.empty() || audioData.f0.empty()) return;
-    if (!vocoder->isLoaded()) return;
-    
+    if (audioData.melSpectrogram.empty() || audioData.f0.empty()) {
+        DBG("No mel spectrogram or F0 data: mel=" << audioData.melSpectrogram.size() << " f0=" << audioData.f0.size());
+        return;
+    }
+    if (!vocoder->isLoaded()) {
+        DBG("Vocoder not loaded");
+        return;
+    }
+
     // Check if there are dirty notes or F0 edits
     if (!project->hasDirtyNotes() && !project->hasF0DirtyRange())
     {
         DBG("No dirty notes or F0 edits, skipping incremental synthesis");
         return;
     }
+
+    DBG("Has dirty notes: " << project->hasDirtyNotes() << " Has F0 dirty: " << project->hasF0DirtyRange());
     
     auto [dirtyStart, dirtyEnd] = project->getDirtyFrameRange();
     if (dirtyStart < 0 || dirtyEnd < 0)
@@ -943,36 +941,78 @@ void MainComponent::resynthesizeIncremental()
     int capturedEndSample = endSample;
     int capturedPaddingFrames = paddingFrames;
     int capturedHopSize = hopSize;
-    
+
+    // Use SafePointer to prevent accessing destroyed component
+    juce::Component::SafePointer<MainComponent> safeThis(this);
+
     // Run vocoder inference asynchronously
-    vocoder->inferAsync(melRange, adjustedF0Range, 
-        [this, capturedStartSample, capturedEndSample, capturedPaddingFrames, capturedHopSize]
+    vocoder->inferAsync(melRange, adjustedF0Range,
+        [safeThis, capturedStartSample, capturedEndSample, capturedPaddingFrames, capturedHopSize]
         (std::vector<float> synthesizedAudio)
         {
-            toolbar.setEnabled(true);
-            parameterPanel.clearLoadingStatus();
-            
+            // Check if component still exists
+            if (safeThis == nullptr)
+            {
+                DBG("MainComponent destroyed, skipping callback");
+                return;
+            }
+
+            safeThis->toolbar.setEnabled(true);
+            safeThis->parameterPanel.clearLoadingStatus();
+
             if (synthesizedAudio.empty())
             {
                 DBG("Incremental synthesis failed: empty output");
                 return;
             }
-            
+
             DBG("Incremental synthesis complete: " << synthesizedAudio.size() << " samples");
-            
-            auto& audioData = project->getAudioData();
+
+            auto& audioData = safeThis->project->getAudioData();
             float* dst = audioData.waveform.getWritePointer(0);
             int totalSamples = audioData.waveform.getNumSamples();
-            
+
             // Calculate actual replace range (skip padding on both ends)
             int paddingSamples = capturedPaddingFrames * capturedHopSize;
             int replaceStartSample = capturedStartSample + paddingSamples;
             int replaceEndSample = capturedEndSample - paddingSamples;
-            
+
             // Calculate source offset in synthesized audio
             int srcOffset = paddingSamples;
             int replaceSamples = replaceEndSample - replaceStartSample;
-            
+
+            // Calculate original audio RMS in the replace region for volume matching
+            float originalRms = 0.0f;
+            int rmsCount = 0;
+            for (int i = replaceStartSample; i < replaceEndSample && i < totalSamples; ++i)
+            {
+                originalRms += dst[i] * dst[i];
+                rmsCount++;
+            }
+            if (rmsCount > 0)
+                originalRms = std::sqrt(originalRms / rmsCount);
+
+            // Calculate synthesized audio RMS
+            float synthRms = 0.0f;
+            int synthCount = 0;
+            for (int i = srcOffset; i < srcOffset + replaceSamples && i < static_cast<int>(synthesizedAudio.size()); ++i)
+            {
+                synthRms += synthesizedAudio[i] * synthesizedAudio[i];
+                synthCount++;
+            }
+            if (synthCount > 0)
+                synthRms = std::sqrt(synthRms / synthCount);
+
+            // Calculate volume scaling factor to match original
+            float volumeScale = 1.0f;
+            if (synthRms > 0.001f && originalRms > 0.001f)
+            {
+                volumeScale = originalRms / synthRms;
+                // Limit scaling to reasonable range
+                volumeScale = std::clamp(volumeScale, 0.1f, 3.0f);
+                DBG("Volume scaling: " << volumeScale << " (original RMS: " << originalRms << ", synth RMS: " << synthRms << ")");
+            }
+
             // Apply crossfade at boundaries for smooth transitions
             const int crossfadeSamples = 256;
             
@@ -984,8 +1024,8 @@ void MainComponent::resynthesizeIncremental()
                 
                 if (srcIdx >= 0 && srcIdx < static_cast<int>(synthesizedAudio.size()))
                 {
-                    float srcVal = synthesizedAudio[srcIdx];
-                    
+                    float srcVal = synthesizedAudio[srcIdx] * volumeScale;
+
                     // Crossfade at start
                     if (i < crossfadeSamples)
                     {
@@ -1007,13 +1047,10 @@ void MainComponent::resynthesizeIncremental()
             }
             
             // Reload waveform in audio engine
-            audioEngine->loadWaveform(audioData.waveform, audioData.sampleRate);
-            
-            // Update UI
-            waveform.repaint();
-            
+            safeThis->audioEngine->loadWaveform(audioData.waveform, audioData.sampleRate);
+
             // Clear dirty flags after successful synthesis
-            project->clearAllDirty();
+            safeThis->project->clearAllDirty();
             
             DBG("Incremental synthesis applied");
         });
@@ -1033,38 +1070,14 @@ void MainComponent::onPitchEdited()
 void MainComponent::onZoomChanged(float pixelsPerSecond)
 {
     if (isSyncingZoom) return;
-    
+
     isSyncingZoom = true;
-    
+
     // Update all components with zoom centered on cursor
     pianoRoll.setPixelsPerSecond(pixelsPerSecond, true);
-    waveform.setPixelsPerSecond(pixelsPerSecond);
     toolbar.setZoom(pixelsPerSecond);
-    
-    // Sync scroll positions after zoom
-    waveform.setScrollX(pianoRoll.getScrollX());
-    
+
     isSyncingZoom = false;
-}
-
-void MainComponent::onScrollChanged(double scrollX)
-{
-    // Called from waveform scroll change
-    if (isSyncingScroll) return;
-    
-    isSyncingScroll = true;
-    pianoRoll.setScrollX(scrollX);
-    isSyncingScroll = false;
-}
-
-void MainComponent::onPianoRollScrollChanged(double scrollX)
-{
-    // Called from piano roll scroll change
-    if (isSyncingScroll) return;
-    
-    isSyncingScroll = true;
-    waveform.setScrollX(scrollX);
-    isSyncingScroll = false;
 }
 
 void MainComponent::undo()
@@ -1120,78 +1133,99 @@ void MainComponent::segmentIntoNotes(Project& targetProject)
     auto& audioData = targetProject.getAudioData();
     auto& notes = targetProject.getNotes();
     notes.clear();
-    
+
     if (audioData.f0.empty()) return;
-    
-    // Segment F0 into notes
+
+    // Helper to finalize a note
+    auto finalizeNote = [&](int start, int end) {
+        if (end - start < 5) return;  // Minimum 5 frames
+
+        // Calculate average F0 for this segment
+        float f0Sum = 0.0f;
+        int f0Count = 0;
+        for (int j = start; j < end; ++j) {
+            if (audioData.f0[j] > 0) {
+                f0Sum += audioData.f0[j];
+                f0Count++;
+            }
+        }
+        if (f0Count == 0) return;
+
+        float avgF0 = f0Sum / f0Count;
+        float midi = freqToMidi(avgF0);
+
+        Note note(start, end, midi);
+        std::vector<float> f0Values(audioData.f0.begin() + start,
+                                    audioData.f0.begin() + end);
+        note.setF0Values(std::move(f0Values));
+        notes.push_back(note);
+    };
+
+    // Segment F0 into notes, splitting on pitch changes > 0.5 semitones
+    constexpr float pitchSplitThreshold = 0.5f;  // semitones
+    constexpr int minFramesForSplit = 3;  // require consecutive frames to confirm pitch change
+
     bool inNote = false;
     int noteStart = 0;
-    float noteF0Sum = 0.0f;
-    int noteF0Count = 0;
-    
+    int currentMidiNote = 0;  // quantized to nearest semitone
+    int pitchChangeCount = 0;
+    int pitchChangeStart = 0;
+
     for (size_t i = 0; i < audioData.f0.size(); ++i)
     {
         bool voiced = audioData.voicedMask[i];
-        
+
         if (voiced && !inNote)
         {
             // Start new note
             inNote = true;
             noteStart = static_cast<int>(i);
-            noteF0Sum = audioData.f0[i];
-            noteF0Count = 1;
+            currentMidiNote = static_cast<int>(std::round(freqToMidi(audioData.f0[i])));
+            pitchChangeCount = 0;
         }
         else if (voiced && inNote)
         {
-            // Continue note
-            noteF0Sum += audioData.f0[i];
-            noteF0Count++;
+            // Check for pitch change
+            float currentMidi = freqToMidi(audioData.f0[i]);
+            int quantizedMidi = static_cast<int>(std::round(currentMidi));
+
+            if (quantizedMidi != currentMidiNote &&
+                std::abs(currentMidi - currentMidiNote) > pitchSplitThreshold)
+            {
+                if (pitchChangeCount == 0)
+                    pitchChangeStart = static_cast<int>(i);
+                pitchChangeCount++;
+
+                // Confirm pitch change after consecutive frames
+                if (pitchChangeCount >= minFramesForSplit)
+                {
+                    // Finalize current note up to pitch change point
+                    finalizeNote(noteStart, pitchChangeStart);
+
+                    // Start new note from pitch change point
+                    noteStart = pitchChangeStart;
+                    currentMidiNote = quantizedMidi;
+                    pitchChangeCount = 0;
+                }
+            }
+            else
+            {
+                pitchChangeCount = 0;  // Reset if pitch returns
+            }
         }
         else if (!voiced && inNote)
         {
-            // End note
-            int noteEnd = static_cast<int>(i);
-            int duration = noteEnd - noteStart;
-            
-            if (duration >= 5)  // Minimum note length: 5 frames
-            {
-                float avgF0 = noteF0Sum / noteF0Count;
-                float midi = freqToMidi(avgF0);
-                
-                Note note(noteStart, noteEnd, midi);  // Use noteEnd, not duration
-                
-                // Store F0 values for this note
-                std::vector<float> f0Values(audioData.f0.begin() + noteStart,
-                                            audioData.f0.begin() + noteEnd);
-                note.setF0Values(std::move(f0Values));
-                
-                notes.push_back(note);
-            }
-            
+            // End note on unvoiced
+            finalizeNote(noteStart, static_cast<int>(i));
             inNote = false;
+            pitchChangeCount = 0;
         }
     }
-    
+
     // Handle note at end
     if (inNote)
     {
-        int noteEnd = static_cast<int>(audioData.f0.size());
-        int duration = noteEnd - noteStart;
-        
-        if (duration >= 5)
-        {
-            float avgF0 = noteF0Sum / noteF0Count;
-            float midi = freqToMidi(avgF0);
-            
-            Note note(noteStart, noteEnd, midi);  // Use noteEnd, not duration
-            
-            // Store F0 values for this note
-            std::vector<float> f0Values(audioData.f0.begin() + noteStart,
-                                        audioData.f0.begin() + noteEnd);
-            note.setF0Values(std::move(f0Values));
-            
-            notes.push_back(note);
-        }
+        finalizeNote(noteStart, static_cast<int>(audioData.f0.size()));
     }
 }
 
@@ -1199,13 +1233,18 @@ void MainComponent::showSettings()
 {
     if (!settingsDialog)
     {
-        settingsDialog = std::make_unique<SettingsDialog>();
+        // Pass AudioDeviceManager only in standalone mode
+        juce::AudioDeviceManager* deviceMgr = nullptr;
+        if (!isPluginMode() && audioEngine)
+            deviceMgr = &audioEngine->getDeviceManager();
+
+        settingsDialog = std::make_unique<SettingsDialog>(deviceMgr);
         settingsDialog->getSettingsComponent()->onSettingsChanged = [this]()
         {
             applySettings();
         };
     }
-    
+
     settingsDialog->setVisible(true);
     settingsDialog->toFront(true);
 }
@@ -1249,9 +1288,7 @@ void MainComponent::applySettings()
 
 void MainComponent::loadConfig()
 {
-    auto configFile = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
-                          .getParentDirectory()
-                          .getChildFile("config.json");
+    auto configFile = PlatformPaths::getConfigFile("config.json");
     
     if (configFile.existsAsFile())
     {
@@ -1278,9 +1315,7 @@ void MainComponent::loadConfig()
 
 void MainComponent::saveConfig()
 {
-    auto configFile = juce::File::getSpecialLocation(juce::File::currentExecutableFile)
-                          .getParentDirectory()
-                          .getChildFile("config.json");
+    auto configFile = PlatformPaths::getConfigFile("config.json");
     
     auto config = new juce::DynamicObject();
     
@@ -1299,4 +1334,174 @@ void MainComponent::saveConfig()
     configFile.replaceWithText(jsonText);
     
     DBG("Config saved to: " + configFile.getFullPathName());
+}
+
+// Menu IDs
+enum MenuIDs
+{
+    menuOpen = 1,
+    menuExport,
+    menuUndo,
+    menuRedo,
+    menuSettings,
+    menuQuit
+};
+
+juce::StringArray MainComponent::getMenuBarNames()
+{
+    return { TR("menu.file"), TR("menu.edit") };
+}
+
+juce::PopupMenu MainComponent::getMenuForIndex(int menuIndex, const juce::String& /*menuName*/)
+{
+    juce::PopupMenu menu;
+
+    if (menuIndex == 0)  // File menu
+    {
+        // Only show open/export in standalone mode
+        if (!isPluginMode())
+        {
+            menu.addItem(menuOpen, TR("menu.open"), true, false);
+            menu.addItem(menuExport, TR("menu.export"), project != nullptr, false);
+        }
+#if !JUCE_MAC
+        if (!isPluginMode())
+            menu.addSeparator();
+        menu.addItem(menuQuit, TR("menu.quit"), true, false);
+#endif
+    }
+    else if (menuIndex == 1)  // Edit menu
+    {
+        bool canUndo = undoManager && undoManager->canUndo();
+        bool canRedo = undoManager && undoManager->canRedo();
+        menu.addItem(menuUndo, TR("menu.undo"), canUndo, false);
+        menu.addItem(menuRedo, TR("menu.redo"), canRedo, false);
+        menu.addSeparator();
+        menu.addItem(menuSettings, TR("menu.settings"), true, false);
+    }
+
+    return menu;
+}
+
+void MainComponent::menuItemSelected(int menuItemID, int /*topLevelMenuIndex*/)
+{
+    switch (menuItemID)
+    {
+        case menuOpen:
+            openFile();
+            break;
+        case menuExport:
+            exportFile();
+            break;
+        case menuUndo:
+            undo();
+            break;
+        case menuRedo:
+            redo();
+            break;
+        case menuSettings:
+            showSettings();
+            break;
+        case menuQuit:
+            juce::JUCEApplication::getInstance()->systemRequestedQuit();
+            break;
+        default:
+            break;
+    }
+}
+
+void MainComponent::setHostAudio(const juce::AudioBuffer<float>& buffer, double sampleRate)
+{
+    if (!isPluginMode())
+        return;
+
+    // Create project if needed
+    if (!project)
+        project = std::make_unique<Project>();
+
+    // Store sample rate
+    project->getAudioData().sampleRate = static_cast<int>(sampleRate);
+
+    // Copy waveform to project
+    project->getAudioData().waveform = buffer;
+
+    // Store original waveform for synthesis
+    originalWaveform = buffer;
+    hasOriginalWaveform = true;
+
+    // Trigger analysis
+    analyzeAudio();
+}
+
+void MainComponent::renderProcessedAudio()
+{
+    if (!isPluginMode() || !hasOriginalWaveform)
+        return;
+
+    // Show progress
+    toolbar.showProgress(TR("progress.rendering"));
+
+    // Run synthesis in background thread
+    std::thread([this]()
+    {
+        // Resynthesize with current edits
+        auto& f0Array = project->getAudioData().f0;
+        auto& voicedMask = project->getAudioData().voicedMask;
+
+        if (f0Array.empty())
+        {
+            juce::MessageManager::callAsync([this]() {
+                toolbar.hideProgress();
+            });
+            return;
+        }
+
+        // Apply global pitch offset
+        std::vector<float> modifiedF0 = f0Array;
+        float globalOffset = project->getGlobalPitchOffset();
+        for (size_t i = 0; i < modifiedF0.size(); ++i)
+        {
+            if (voicedMask[i] && modifiedF0[i] > 0)
+                modifiedF0[i] *= std::pow(2.0f, globalOffset / 12.0f);
+        }
+
+        // Get mel spectrogram
+        auto& melSpec = project->getAudioData().melSpectrogram;
+        if (melSpec.empty())
+        {
+            juce::MessageManager::callAsync([this]() {
+                toolbar.hideProgress();
+            });
+            return;
+        }
+
+        // Synthesize
+        auto synthesized = vocoder->infer(melSpec, modifiedF0);
+
+        if (!synthesized.empty())
+        {
+            // Create output buffer
+            juce::AudioBuffer<float> outputBuffer(originalWaveform.getNumChannels(),
+                                                   static_cast<int>(synthesized.size()));
+
+            // Copy to all channels
+            for (int ch = 0; ch < outputBuffer.getNumChannels(); ++ch)
+            {
+                for (int i = 0; i < outputBuffer.getNumSamples(); ++i)
+                    outputBuffer.setSample(ch, i, synthesized[i]);
+            }
+
+            juce::MessageManager::callAsync([this, buf = std::move(outputBuffer)]() mutable {
+                toolbar.hideProgress();
+                if (onRenderComplete)
+                    onRenderComplete(buf);
+            });
+        }
+        else
+        {
+            juce::MessageManager::callAsync([this]() {
+                toolbar.hideProgress();
+            });
+        }
+    }).detach();
 }

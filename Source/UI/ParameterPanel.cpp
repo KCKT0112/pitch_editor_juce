@@ -1,4 +1,6 @@
 #include "ParameterPanel.h"
+#include "StyledComponents.h"
+#include "../Utils/Localization.h"
 
 ParameterPanel::ParameterPanel()
 {
@@ -9,45 +11,53 @@ ParameterPanel::ParameterPanel()
     loadingStatusLabel.setJustificationType(juce::Justification::centred);
     loadingStatusLabel.setFont(juce::Font(13.0f, juce::Font::bold));
     loadingStatusLabel.setVisible(false);
-    
+
     // Progress bar
     addAndMakeVisible(progressBar);
     progressBar.setColour(juce::ProgressBar::foregroundColourId, juce::Colour(COLOR_PRIMARY));
     progressBar.setColour(juce::ProgressBar::backgroundColourId, juce::Colour(0xFF2D2D37));
     progressBar.setVisible(false);
-    
+
     // Note info
     addAndMakeVisible(noteInfoLabel);
     noteInfoLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    noteInfoLabel.setText("No note selected", juce::dontSendNotification);
+    noteInfoLabel.setText(TR("param.no_selection"), juce::dontSendNotification);
     noteInfoLabel.setJustificationType(juce::Justification::centred);
-    
+
     // Setup sliders
-    setupSlider(pitchOffsetSlider, pitchOffsetLabel, "Pitch Offset", -24.0, 24.0, 0.0);
+    setupSlider(pitchOffsetSlider, pitchOffsetLabel, TR("param.pitch_offset"), -24.0, 24.0, 0.0);
 
     // Vibrato
     addAndMakeVisible(vibratoEnableButton);
+    vibratoEnableButton.setButtonText(TR("param.vibrato_enable"));
     vibratoEnableButton.addListener(this);
     vibratoEnableButton.setColour(juce::ToggleButton::textColourId, juce::Colours::white);
+    vibratoEnableButton.setLookAndFeel(&DarkLookAndFeel::getInstance());
     vibratoEnableButton.setEnabled(false);
 
-    setupSlider(vibratoRateSlider, vibratoRateLabel, "Vibrato Rate", 0.1, 12.0, 5.0);
-    setupSlider(vibratoDepthSlider, vibratoDepthLabel, "Vibrato Depth", 0.0, 2.0, 0.0);
+    setupSlider(vibratoRateSlider, vibratoRateLabel, TR("param.vibrato_rate"), 0.1, 12.0, 5.0);
+    setupSlider(vibratoDepthSlider, vibratoDepthLabel, TR("param.vibrato_depth"), 0.0, 2.0, 0.0);
     vibratoRateSlider.setEnabled(false);
     vibratoDepthSlider.setEnabled(false);
-    setupSlider(volumeSlider, volumeLabel, "Volume", -24.0, 12.0, 0.0);
-    setupSlider(formantShiftSlider, formantShiftLabel, "Formant", -12.0, 12.0, 0.0);
-    setupSlider(globalPitchSlider, globalPitchLabel, "Global Pitch", -24.0, 24.0, 0.0);
-    
+    setupSlider(volumeSlider, volumeLabel, TR("param.volume_label"), -24.0, 12.0, 0.0);
+    setupSlider(formantShiftSlider, formantShiftLabel, TR("param.formant_shift"), -12.0, 12.0, 0.0);
+    setupSlider(globalPitchSlider, globalPitchLabel, TR("param.global_pitch"), -24.0, 24.0, 0.0);
+
     // Section labels
-    for (auto* label : { &pitchSectionLabel, &volumeSectionLabel, 
+    pitchSectionLabel.setText(TR("param.pitch"), juce::dontSendNotification);
+    vibratoSectionLabel.setText(TR("param.vibrato"), juce::dontSendNotification);
+    volumeSectionLabel.setText(TR("param.volume"), juce::dontSendNotification);
+    formantSectionLabel.setText(TR("param.formant"), juce::dontSendNotification);
+    globalSectionLabel.setText(TR("param.global"), juce::dontSendNotification);
+
+    for (auto* label : { &pitchSectionLabel, &volumeSectionLabel,
                          &vibratoSectionLabel, &formantSectionLabel, &globalSectionLabel })
     {
         addAndMakeVisible(label);
         label->setColour(juce::Label::textColourId, juce::Colour(COLOR_PRIMARY));
         label->setFont(juce::Font(14.0f, juce::Font::bold));
     }
-    
+
     // Volume and formant sliders disabled (not implemented yet)
     volumeSlider.setEnabled(false);
     formantShiftSlider.setEnabled(false);
@@ -57,6 +67,7 @@ ParameterPanel::ParameterPanel()
 
 ParameterPanel::~ParameterPanel()
 {
+    vibratoEnableButton.setLookAndFeel(nullptr);
     stopTimer();
 }
 
@@ -65,19 +76,24 @@ void ParameterPanel::setupSlider(juce::Slider& slider, juce::Label& label,
 {
     addAndMakeVisible(slider);
     addAndMakeVisible(label);
-    
+
     slider.setRange(min, max, 0.01);
     slider.setValue(def);
     slider.setSliderStyle(juce::Slider::LinearHorizontal);
-    slider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    slider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 55, 22);
     slider.addListener(this);
-    
-    slider.setColour(juce::Slider::trackColourId, juce::Colour(0xFF3D3D47));
+
+    // Slider track colors
+    slider.setColour(juce::Slider::backgroundColourId, juce::Colour(0xFF2D2D37));
+    slider.setColour(juce::Slider::trackColourId, juce::Colour(COLOR_PRIMARY).withAlpha(0.6f));
     slider.setColour(juce::Slider::thumbColourId, juce::Colour(COLOR_PRIMARY));
+
+    // Text box colors - match dark theme with subtle border
     slider.setColour(juce::Slider::textBoxTextColourId, juce::Colours::white);
-    slider.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0xFF2D2D37));
-    slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    
+    slider.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0xFF252530));
+    slider.setColour(juce::Slider::textBoxOutlineColourId, juce::Colour(0xFF3D3D47));
+    slider.setColour(juce::Slider::textBoxHighlightColourId, juce::Colour(COLOR_PRIMARY).withAlpha(0.3f));
+
     label.setColour(juce::Label::textColourId, juce::Colours::lightgrey);
 }
 
@@ -172,7 +188,11 @@ void ParameterPanel::sliderValueChanged(juce::Slider* slider)
     else if (slider == &globalPitchSlider && project)
     {
         project->setGlobalPitchOffset(static_cast<float>(slider->getValue()));
-        
+
+        // Mark all notes as dirty for full resynthesis
+        for (auto& note : project->getNotes())
+            note.markDirty();
+
         if (onGlobalPitchChanged)
             onGlobalPitchChanged();
     }

@@ -36,6 +36,7 @@ public:
     void mouseMove(const juce::MouseEvent& e) override;
     void mouseDoubleClick(const juce::MouseEvent& e) override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+    void mouseMagnify(const juce::MouseEvent& e, float scaleFactor) override;
     
     // ScrollBar::Listener
     void scrollBarMoved(juce::ScrollBar* scrollBar, double newRangeStart) override;
@@ -61,6 +62,7 @@ public:
     // Scroll
     void setScrollX(double x);
     double getScrollX() const { return scrollX; }
+    void centerOnPitchRange(float minMidi, float maxMidi);
     
     // Edit mode
     void setEditMode(EditMode mode);
@@ -75,7 +77,9 @@ public:
     std::function<void(double)> onScrollChanged;
     
 private:
+    void drawBackgroundWaveform(juce::Graphics& g, const juce::Rectangle<int>& visibleArea);
     void drawGrid(juce::Graphics& g);
+    void drawTimeline(juce::Graphics& g);
     void drawNotes(juce::Graphics& g);
     void drawPitchCurves(juce::Graphics& g);
     void drawCursor(juce::Graphics& g);
@@ -106,6 +110,7 @@ private:
     
     // Piano keys area width
     static constexpr int pianoKeysWidth = 60;
+    static constexpr int timelineHeight = 24;
     
     // Edit mode
     EditMode editMode = EditMode::Select;

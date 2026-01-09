@@ -7,14 +7,21 @@ echo
 
 cd "$(dirname "$0")"
 
-# Check if JUCE exists
-if [ ! -d "JUCE" ]; then
-    echo "JUCE not found, cloning..."
-    git clone --depth 1 https://github.com/juce-framework/JUCE.git
+# Initialize git submodules (JUCE and ARA_SDK)
+if [ ! -f "third_party/JUCE/CMakeLists.txt" ]; then
+    echo "Initializing git submodules..."
+    git submodule update --init --recursive
     if [ $? -ne 0 ]; then
-        echo "Failed to clone JUCE"
+        echo "Failed to initialize submodules"
         exit 1
     fi
+fi
+
+# Detect CPU count (cross-platform)
+if [ "$(uname)" = "Darwin" ]; then
+    NPROC=$(sysctl -n hw.ncpu)
+else
+    NPROC=$(nproc)
 fi
 
 # Create build directory
@@ -30,10 +37,10 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Build
+# Build all targets
 echo
 echo "Building..."
-cmake --build . --config Release -j$(nproc)
+cmake --build . --config Release -j${NPROC}
 if [ $? -ne 0 ]; then
     echo "Build failed"
     exit 1
@@ -42,4 +49,9 @@ fi
 echo
 echo "========================================"
 echo "Build successful!"
+echo "========================================"
+echo "Outputs:"
+echo "  Standalone: build/PitchEditor_artefacts/Release/"
+echo "  VST3:       build/PitchEditorPlugin_artefacts/Release/VST3/"
+echo "  AU:         build/PitchEditorPlugin_artefacts/Release/AU/"
 echo "========================================"

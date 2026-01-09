@@ -44,11 +44,7 @@ public:
     // Selection
     bool isSelected() const { return selected; }
     void setSelected(bool sel) { selected = sel; }
-    
-    // Color
-    juce::Colour getColor() const { return color; }
-    void setColor(juce::Colour c) { color = c; }
-    
+
     // Dirty flag (for incremental synthesis)
     bool isDirty() const { return dirty; }
     void setDirty(bool d) { dirty = d; }
@@ -72,5 +68,4 @@ private:
     std::vector<float> f0Values;
     bool selected = false;
     bool dirty = false;  // For incremental synthesis
-    juce::Colour color = juce::Colour(0xFF9B59B6);
 };

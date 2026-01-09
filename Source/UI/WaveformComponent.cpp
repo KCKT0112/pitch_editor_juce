@@ -112,43 +112,68 @@ void WaveformComponent::mouseDown(const juce::MouseEvent& e)
 
 void WaveformComponent::mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel)
 {
-    if (e.mods.isCtrlDown())
+    float scrollMultiplier = wheel.isSmooth ? 200.0f : 80.0f;
+
+    // Cmd/Ctrl + scroll = zoom
+    if (e.mods.isCommandDown() || e.mods.isCtrlDown())
     {
-        // Zoom - center on cursor position
-        float zoomFactor = 1.0f + wheel.deltaY * 0.1f;
-        float newPps = juce::jlimit(MIN_PIXELS_PER_SECOND, MAX_PIXELS_PER_SECOND,
-                                     pixelsPerSecond * zoomFactor);
-        
-        if (newPps != pixelsPerSecond)
-        {
-            // Calculate cursor position relative to view
-            float cursorX = static_cast<float>(cursorTime * pixelsPerSecond);
-            float cursorRelativeX = cursorX - static_cast<float>(scrollX);
-            
-            // Update zoom
-            pixelsPerSecond = newPps;
-            
-            // Calculate new scroll position to keep cursor at same relative position
-            float newCursorX = static_cast<float>(cursorTime * newPps);
-            scrollX = static_cast<double>(newCursorX - cursorRelativeX);
-            scrollX = std::max(0.0, scrollX);
-            
-            updateScrollBar();
-            
-            if (onZoomChanged)
-                onZoomChanged(pixelsPerSecond);
-            
-            if (onScrollChanged)
-                onScrollChanged(scrollX);
-            
-            repaint();
-        }
+        float zoomFactor = 1.0f + wheel.deltaY * 0.3f;
+        float mouseX = static_cast<float>(e.x);
+        double timeAtMouse = xToTime(mouseX + static_cast<float>(scrollX));
+
+        float newPps = pixelsPerSecond * zoomFactor;
+        newPps = juce::jlimit(MIN_PIXELS_PER_SECOND, MAX_PIXELS_PER_SECOND, newPps);
+
+        // Adjust scroll to keep mouse position stable
+        float newMouseX = static_cast<float>(timeAtMouse * newPps);
+        scrollX = std::max(0.0, static_cast<double>(newMouseX - mouseX));
+
+        pixelsPerSecond = newPps;
+        updateScrollBar();
+        repaint();
+
+        if (onZoomChanged)
+            onZoomChanged(pixelsPerSecond);
+
+        if (onScrollChanged)
+            onScrollChanged(scrollX);
+
+        return;
     }
-    else
+
+    // Horizontal scroll (use deltaX for trackpad, or deltaY with Shift for mouse)
+    float deltaX = wheel.deltaX;
+    if (e.mods.isShiftDown() && std::abs(deltaX) < 0.001f)
+        deltaX = wheel.deltaY;
+
+    if (std::abs(deltaX) > 0.001f)
     {
-        // Scroll
-        horizontalScrollBar.setCurrentRangeStart(scrollX - wheel.deltaY * 50.0);
+        double newScrollX = scrollX - deltaX * scrollMultiplier;
+        newScrollX = std::max(0.0, newScrollX);
+        horizontalScrollBar.setCurrentRangeStart(newScrollX);
     }
+}
+
+void WaveformComponent::mouseMagnify(const juce::MouseEvent& e, float scaleFactor)
+{
+    float mouseX = static_cast<float>(e.x);
+    double timeAtMouse = xToTime(mouseX + static_cast<float>(scrollX));
+
+    float newPps = pixelsPerSecond * scaleFactor;
+    newPps = juce::jlimit(MIN_PIXELS_PER_SECOND, MAX_PIXELS_PER_SECOND, newPps);
+
+    float newMouseX = static_cast<float>(timeAtMouse * newPps);
+    scrollX = std::max(0.0, static_cast<double>(newMouseX - mouseX));
+
+    pixelsPerSecond = newPps;
+    updateScrollBar();
+    repaint();
+
+    if (onZoomChanged)
+        onZoomChanged(pixelsPerSecond);
+
+    if (onScrollChanged)
+        onScrollChanged(scrollX);
 }
 
 void WaveformComponent::scrollBarMoved(juce::ScrollBar* /*scrollBar*/, double newRangeStart)

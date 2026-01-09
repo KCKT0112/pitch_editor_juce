@@ -14,17 +14,25 @@ Project::Project()
 
 bool Project::saveToFile(const juce::File& file) const
 {
-    juce::XmlElement root("PitchEditorProject");
-    root.setAttribute("version", 1);
-    root.setAttribute("name", name);
-    root.setAttribute("audioPath", filePath.getFullPathName());
-    root.setAttribute("sampleRate", audioData.sampleRate);
-    root.setAttribute("globalPitchOffset", globalPitchOffset);
-    root.setAttribute("formantShift", formantShift);
-    root.setAttribute("volume", volume);
+    auto xml = toXml();
+    if (!xml)
+        return false;
+    return xml->writeTo(file);
+}
+
+std::unique_ptr<juce::XmlElement> Project::toXml() const
+{
+    auto root = std::make_unique<juce::XmlElement>("PitchEditorProject");
+    root->setAttribute("version", 1);
+    root->setAttribute("name", name);
+    root->setAttribute("audioPath", filePath.getFullPathName());
+    root->setAttribute("sampleRate", audioData.sampleRate);
+    root->setAttribute("globalPitchOffset", globalPitchOffset);
+    root->setAttribute("formantShift", formantShift);
+    root->setAttribute("volume", volume);
 
     // Notes
-    auto* notesElem = root.createNewChildElement("Notes");
+    auto* notesElem = root->createNewChildElement("Notes");
     for (const auto& note : notes)
     {
         auto* n = notesElem->createNewChildElement("Note");
@@ -40,7 +48,7 @@ bool Project::saveToFile(const juce::File& file) const
     }
 
     // F0
-    auto* f0Elem = root.createNewChildElement("F0");
+    auto* f0Elem = root->createNewChildElement("F0");
     {
         juce::StringArray parts;
         parts.ensureStorageAllocated(static_cast<int>(audioData.f0.size()));
@@ -50,7 +58,7 @@ bool Project::saveToFile(const juce::File& file) const
     }
 
     // VoicedMask
-    auto* voicedElem = root.createNewChildElement("VoicedMask");
+    auto* voicedElem = root->createNewChildElement("VoicedMask");
     {
         juce::String mask;
         mask.preallocateBytes(static_cast<size_t>(audioData.voicedMask.size()));
@@ -59,8 +67,70 @@ bool Project::saveToFile(const juce::File& file) const
         voicedElem->addTextElement(mask);
     }
 
-    const bool ok = root.writeTo(file);
-    return ok;
+    return root;
+}
+
+bool Project::fromXml(const juce::XmlElement& xml)
+{
+    if (xml.getTagName() != "PitchEditorProject")
+        return false;
+
+    name = xml.getStringAttribute("name", "Untitled");
+    filePath = juce::File(xml.getStringAttribute("audioPath"));
+    audioData.sampleRate = xml.getIntAttribute("sampleRate", 44100);
+    globalPitchOffset = static_cast<float>(xml.getDoubleAttribute("globalPitchOffset", 0.0));
+    formantShift = static_cast<float>(xml.getDoubleAttribute("formantShift", 0.0));
+    volume = static_cast<float>(xml.getDoubleAttribute("volume", 0.0));
+
+    // Notes
+    notes.clear();
+    if (auto* notesElem = xml.getChildByName("Notes"))
+    {
+        for (auto* n = notesElem->getFirstChildElement(); n != nullptr; n = n->getNextElement())
+        {
+            if (n->getTagName() == "Note")
+            {
+                Note note;
+                note.setStartFrame(n->getIntAttribute("startFrame", 0));
+                note.setEndFrame(n->getIntAttribute("endFrame", 0));
+                note.setMidiNote(static_cast<float>(n->getDoubleAttribute("midiNote", 60.0)));
+                note.setPitchOffset(static_cast<float>(n->getDoubleAttribute("pitchOffset", 0.0)));
+                note.setVibratoEnabled(n->getIntAttribute("vibratoEnabled", 0) != 0);
+                note.setVibratoRateHz(static_cast<float>(n->getDoubleAttribute("vibratoRateHz", 5.0)));
+                note.setVibratoDepthSemitones(static_cast<float>(n->getDoubleAttribute("vibratoDepthSemitones", 0.0)));
+                note.setVibratoPhaseRadians(static_cast<float>(n->getDoubleAttribute("vibratoPhaseRadians", 0.0)));
+                notes.push_back(std::move(note));
+            }
+        }
+    }
+
+    // F0
+    audioData.f0.clear();
+    if (auto* f0Elem = xml.getChildByName("F0"))
+    {
+        juce::String f0Text = f0Elem->getAllSubText();
+        juce::StringArray parts;
+        parts.addTokens(f0Text, " ", "");
+        audioData.f0.reserve(static_cast<size_t>(parts.size()));
+        for (const auto& p : parts)
+        {
+            if (p.isNotEmpty())
+                audioData.f0.push_back(p.getFloatValue());
+        }
+    }
+
+    // VoicedMask
+    audioData.voicedMask.clear();
+    if (auto* voicedElem = xml.getChildByName("VoicedMask"))
+    {
+        juce::String mask = voicedElem->getAllSubText();
+        audioData.voicedMask.reserve(static_cast<size_t>(mask.length()));
+        for (int i = 0; i < mask.length(); ++i)
+            audioData.voicedMask.push_back(mask[i] == '1');
+    }
+
+    modified = false;
+    return true;
 }
 
 Note* Project::getNoteAtFrame(int frame)
@@ -345,27 +415,33 @@ std::vector<float> Project::getAdjustedF0ForRange(int startFrame, int endFrame) 
         }
     }
     
-    // Apply smoothing at transitions (simplified for range)
-    const int smoothFrames = 5;
-    
+    // Apply smoothing at transitions between different pitch offsets
+    const int smoothFrames = 20;  // ~50ms at 400fps for smooth transitions
+
+    // Find transition points and smooth them
     for (int i = 1; i < rangeSize; ++i)
     {
-        if (std::abs(frameRatios[i] - frameRatios[i-1]) > 0.001f)
+        float diff = std::abs(frameRatios[i] - frameRatios[i-1]);
+        if (diff > 0.001f)
         {
-            int startIdx = std::max(0, i - smoothFrames / 2);
-            int endIdx = std::min(rangeSize, i + smoothFrames / 2 + 2);
-            
-            if (endIdx - startIdx > 1)
+            // Found a transition point, apply smoothing around it
+            int smoothStart = std::max(0, i - smoothFrames);
+            int smoothEnd = std::min(rangeSize, i + smoothFrames);
+
+            float valBefore = frameRatios[smoothStart];
+            float valAfter = frameRatios[smoothEnd - 1];
+
+            // Use cosine interpolation for smoother transitions
+            for (int j = smoothStart; j < smoothEnd; ++j)
             {
-                float valBefore = frameRatios[startIdx];
-                float valAfter = frameRatios[endIdx - 1];
-                
-                for (int j = startIdx; j < endIdx; ++j)
-                {
-                    float t = static_cast<float>(j - startIdx) / (endIdx - startIdx - 1);
-                    frameRatios[j] = valBefore + t * (valAfter - valBefore);
-                }
+                float t = static_cast<float>(j - smoothStart) / (smoothEnd - smoothStart - 1);
+                // Cosine interpolation: smoother than linear
+                float smoothT = (1.0f - std::cos(t * 3.14159f)) * 0.5f;
+                frameRatios[j] = valBefore + smoothT * (valAfter - valBefore);
             }
+
+            // Skip past the smoothed region
+            i = smoothEnd - 1;
         }
     }
     

@@ -16,6 +16,7 @@ public:
     
     void mouseDown(const juce::MouseEvent& e) override;
     void mouseWheelMove(const juce::MouseEvent& e, const juce::MouseWheelDetails& wheel) override;
+    void mouseMagnify(const juce::MouseEvent& e, float scaleFactor) override;
     
     void scrollBarMoved(juce::ScrollBar* scrollBar, double newRangeStart) override;
     

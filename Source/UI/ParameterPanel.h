@@ -5,6 +5,8 @@
 #include "../Models/Project.h"
 #include "../Utils/Constants.h"
 
+class DarkLookAndFeel;  // Forward declaration
+
 class ParameterPanel : public juce::Component,
                        public juce::Slider::Listener,
                        public juce::Button::Listener,

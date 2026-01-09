@@ -4,7 +4,6 @@
 Note::Note(int startFrame, int endFrame, float midiNote)
     : startFrame(startFrame), endFrame(endFrame), midiNote(midiNote)
 {
-    color = getNoteColor(static_cast<int>(midiNote));
 }
 
 std::vector<float> Note::getAdjustedF0() const

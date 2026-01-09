@@ -10,75 +10,55 @@ constexpr float FMIN = 40.0f;
 constexpr float FMAX = 16000.0f;
 
 // MIDI constants
-constexpr int MIN_MIDI_NOTE = 24;   // C1
-constexpr int MAX_MIDI_NOTE = 96;   // C7
+constexpr int MIN_MIDI_NOTE = 24; // C1
+constexpr int MAX_MIDI_NOTE = 96; // C7
 constexpr int MIDI_A4 = 69;
 constexpr float FREQ_A4 = 440.0f;
 
 // UI constants
 constexpr float DEFAULT_PIXELS_PER_SECOND = 100.0f;
-constexpr float DEFAULT_PIXELS_PER_SEMITONE = 20.0f;
+constexpr float DEFAULT_PIXELS_PER_SEMITONE = 45.0f;
 constexpr float MIN_PIXELS_PER_SECOND = 20.0f;
 constexpr float MAX_PIXELS_PER_SECOND = 500.0f;
 constexpr float MIN_PIXELS_PER_SEMITONE = 8.0f;
-constexpr float MAX_PIXELS_PER_SEMITONE = 60.0f;
+constexpr float MAX_PIXELS_PER_SEMITONE = 120.0f;
 
-// Colors (ARGB format)
-constexpr juce::uint32 COLOR_BACKGROUND = 0xFF1E1E28;
-constexpr juce::uint32 COLOR_GRID = 0xFF2D2D37;
-constexpr juce::uint32 COLOR_GRID_BAR = 0xFF3D3D47;
-constexpr juce::uint32 COLOR_PITCH_CURVE = 0xFFFFD700;
-constexpr juce::uint32 COLOR_NOTE_NORMAL = 0xFF9B59B6;
-constexpr juce::uint32 COLOR_NOTE_SELECTED = 0xFFE74C3C;
-constexpr juce::uint32 COLOR_NOTE_HOVER = 0xFFBB8FCE;
-constexpr juce::uint32 COLOR_PRIMARY = 0xFF3498DB;
-constexpr juce::uint32 COLOR_WAVEFORM = 0xFF2ECC71;
+// Colors (ARGB format) - Modern dark theme
+constexpr juce::uint32 COLOR_BACKGROUND = 0xFF2A2A35;  // Dark gray-blue
+constexpr juce::uint32 COLOR_GRID = 0xFF3A3A45;        // Subtle grid
+constexpr juce::uint32 COLOR_GRID_BAR = 0xFF4A4A55;    // Bar lines
+constexpr juce::uint32 COLOR_PITCH_CURVE = 0xFFFFFFFF; // White pitch curve
+constexpr juce::uint32 COLOR_NOTE_NORMAL =
+    0xFF6B5BFF; // Blue-purple (like reference)
+constexpr juce::uint32 COLOR_NOTE_SELECTED =
+    0xFF8B7BFF; // Lighter purple when selected
+constexpr juce::uint32 COLOR_NOTE_HOVER = 0xFF7B6BFF; // Hover state
+constexpr juce::uint32 COLOR_PRIMARY = 0xFF6B5BFF;    // Primary accent
+constexpr juce::uint32 COLOR_WAVEFORM =
+    0xFF353540; // Background waveform (very subtle)
 
 // Note names - use inline function to avoid global construction issues
-inline const juce::StringArray& getNoteNames()
-{
-    static const juce::StringArray names = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-    return names;
-}
-
-// Note colors by pitch class
-inline juce::Colour getNoteColor(int midiNote)
-{
-    static const juce::Colour colors[] = {
-        juce::Colour(0xFF9B59B6),  // C - Purple
-        juce::Colour(0xFF8E44AD),  // C#
-        juce::Colour(0xFF3498DB),  // D - Blue
-        juce::Colour(0xFF2980B9),  // D#
-        juce::Colour(0xFF1ABC9C),  // E - Teal
-        juce::Colour(0xFF2ECC71),  // F - Green
-        juce::Colour(0xFF27AE60),  // F#
-        juce::Colour(0xFFF1C40F),  // G - Yellow
-        juce::Colour(0xFFF39C12),  // G#
-        juce::Colour(0xFFE67E22),  // A - Orange
-        juce::Colour(0xFFD35400),  // A#
-        juce::Colour(0xFFE74C3C),  // B - Red
-    };
-    return colors[midiNote % 12];
+inline const juce::StringArray &getNoteNames() {
+  static const juce::StringArray names = {"C",  "C#", "D",  "D#", "E",  "F",
+                                          "F#", "G",  "G#", "A",  "A#", "B"};
+  return names;
 }
 
 // Utility functions
-inline float midiToFreq(float midi)
-{
-    return FREQ_A4 * std::pow(2.0f, (midi - MIDI_A4) / 12.0f);
+inline float midiToFreq(float midi) {
+  return FREQ_A4 * std::pow(2.0f, (midi - MIDI_A4) / 12.0f);
 }
 
-inline float freqToMidi(float freq)
-{
-    if (freq <= 0.0f) return 0.0f;
-    return 12.0f * std::log2(freq / FREQ_A4) + MIDI_A4;
+inline float freqToMidi(float freq) {
+  if (freq <= 0.0f)
+    return 0.0f;
+  return 12.0f * std::log2(freq / FREQ_A4) + MIDI_A4;
 }
 
-inline int secondsToFrames(float seconds)
-{
-    return static_cast<int>(seconds * SAMPLE_RATE / HOP_SIZE);
+inline int secondsToFrames(float seconds) {
+  return static_cast<int>(seconds * SAMPLE_RATE / HOP_SIZE);
 }
 
-inline float framesToSeconds(int frames)
-{
-    return static_cast<float>(frames) * HOP_SIZE / SAMPLE_RATE;
+inline float framesToSeconds(int frames) {
+  return static_cast<float>(frames) * HOP_SIZE / SAMPLE_RATE;
 }

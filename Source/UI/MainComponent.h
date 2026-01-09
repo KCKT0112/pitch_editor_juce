@@ -7,9 +7,9 @@
 #include "../Audio/FCPEPitchDetector.h"
 #include "../Audio/Vocoder.h"
 #include "../Utils/UndoManager.h"
+#include "CustomTitleBar.h"
 #include "ToolbarComponent.h"
 #include "PianoRollComponent.h"
-#include "WaveformComponent.h"
 #include "ParameterPanel.h"
 #include "SettingsComponent.h"
 
@@ -18,20 +18,43 @@
 
 class MainComponent : public juce::Component,
                       public juce::Timer,
-                      public juce::KeyListener
+                      public juce::KeyListener,
+                      public juce::MenuBarModel
 {
 public:
     explicit MainComponent(bool enableAudioDevice = true);
     ~MainComponent() override;
-    
+
     void paint(juce::Graphics& g) override;
     void resized() override;
-    
+
     void timerCallback() override;
-    
+
     // KeyListener
     bool keyPressed(const juce::KeyPress& key, juce::Component* originatingComponent) override;
-    
+
+    // Mouse handling for window dragging on macOS
+    void mouseDown(const juce::MouseEvent& e) override;
+    void mouseDrag(const juce::MouseEvent& e) override;
+    void mouseDoubleClick(const juce::MouseEvent& e) override;
+
+    // MenuBarModel
+    juce::StringArray getMenuBarNames() override;
+    juce::PopupMenu getMenuForIndex(int menuIndex, const juce::String& menuName) override;
+    void menuItemSelected(int menuItemID, int topLevelMenuIndex) override;
+
+    // Plugin mode
+    bool isPluginMode() const { return !enableAudioDeviceFlag; }
+    Project* getProject() { return project.get(); }
+
+    // Plugin mode - host audio handling
+    void setHostAudio(const juce::AudioBuffer<float>& buffer, double sampleRate);
+    void renderProcessedAudio();
+
+    // Plugin mode callbacks
+    std::function<void()> onReanalyzeRequested;
+    std::function<void(const juce::AudioBuffer<float>&)> onRenderComplete;
+
 private:
     void openFile();
     void exportFile();
@@ -39,16 +62,13 @@ private:
     void pause();
     void stop();
     void seek(double time);
-    void resynthesize();
-    void resynthesizeIncremental();  // Incremental synthesis for preview
+    void resynthesizeIncremental();  // Incremental synthesis on edit
     void showSettings();
     void applySettings();
     
     void onNoteSelected(Note* note);
     void onPitchEdited();
     void onZoomChanged(float pixelsPerSecond);
-    void onScrollChanged(double scrollX);
-    void onPianoRollScrollChanged(double scrollX);
     
     void loadAudioFile(const juce::File& file);
     void analyzeAudio();
@@ -75,10 +95,13 @@ private:
     bool useFCPE = true;  // Use FCPE by default if available
 
     const bool enableAudioDeviceFlag;
-    
+
+#if !JUCE_MAC
+    CustomTitleBar titleBar;
+    juce::MenuBarComponent menuBar;
+#endif
     ToolbarComponent toolbar;
     PianoRollComponent pianoRoll;
-    WaveformComponent waveform;
     ParameterPanel parameterPanel;
     
     std::unique_ptr<SettingsDialog> settingsDialog;
@@ -90,10 +113,13 @@ private:
     bool hasOriginalWaveform = false;
     
     bool isPlaying = false;
-    
-    // Sync flags to prevent infinite loops
-    bool isSyncingScroll = false;
+
+    // Sync flag to prevent infinite loops
     bool isSyncingZoom = false;
+
+#if JUCE_MAC
+    juce::ComponentDragger dragger;
+#endif
 
     // Async load state
     std::thread loaderThread;

@@ -9,10 +9,18 @@
 #include <onnxruntime_cxx_api.h>
 #endif
 
+// GPU execution provider types
+enum class GPUProvider
+{
+    CPU = 0,
+    CUDA,      // NVIDIA GPU
+    DirectML   // Windows DirectX 12 (AMD/Intel/NVIDIA)
+};
+
 /**
  * FCPE (F0 Contour Pitch Estimator) - Deep learning based pitch detector.
  * Uses ONNX Runtime for inference.
- * 
+ *
  * This implementation matches the PyTorch FCPE model's mel extraction
  * and post-processing to ensure consistent results.
  */
@@ -43,11 +51,15 @@ public:
      * @param modelPath Path to fcpe.onnx
      * @param melFilterbankPath Path to mel_filterbank.bin (optional)
      * @param centTablePath Path to cent_table.bin (optional)
+     * @param provider GPU provider (CPU, CUDA, or DirectML)
+     * @param deviceId GPU device ID (0 = first GPU)
      * @return true if successful
      */
     bool loadModel(const juce::File& modelPath,
                    const juce::File& melFilterbankPath = juce::File(),
-                   const juce::File& centTablePath = juce::File());
+                   const juce::File& centTablePath = juce::File(),
+                   GPUProvider provider = GPUProvider::CPU,
+                   int deviceId = 0);
     
     /**
      * Check if model is loaded.

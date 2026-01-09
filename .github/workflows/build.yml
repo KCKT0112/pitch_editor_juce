@@ -11,7 +11,7 @@ on:
 
 env:
   BUILD_TYPE: Release
-  ONNX_VERSION: "1.18.0"
+  ONNX_VERSION: "1.17.1"
 
 jobs:
   build-windows-cpu:
@@ -26,39 +26,19 @@ jobs:
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v1.1
 
-      - name: Cache JUCE
-        id: cache-juce
-        uses: actions/cache@v3
-        with:
-          path: JUCE
-          key: juce-windows-${{ hashFiles('CMakeLists.txt') }}
-
-      - name: Clone JUCE
-        if: steps.cache-juce.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch 7.0.9 https://github.com/juce-framework/JUCE.git
-
-      - name: Download ONNX Runtime CPU
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-win-x64-${{ env.ONNX_VERSION }}.zip" -OutFile "onnxruntime.zip"
-          Expand-Archive -Path "onnxruntime.zip" -DestinationPath "."
-          Rename-Item "onnxruntime-win-x64-${{ env.ONNX_VERSION }}" "onnxruntime"
-
       - name: Configure CMake
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DONNXRUNTIME_ROOT="./onnxruntime"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
       - name: Build
-        run: |
-          cmake --build build --config ${{ env.BUILD_TYPE }}
+        run: cmake --build build --config ${{ env.BUILD_TYPE }}
 
       - name: Package
         run: |
           New-Item -ItemType Directory -Force -Path package/PitchEditor-Windows-CPU
           Copy-Item "build/PitchEditor_artefacts/Release/Pitch Editor.exe" -Destination "package/PitchEditor-Windows-CPU/PitchEditor.exe"
-          Copy-Item onnxruntime/lib/onnxruntime.dll -Destination package/PitchEditor-Windows-CPU/
-          Copy-Item -Recurse models -Destination package/PitchEditor-Windows-CPU/
-          Compress-Archive -Path package/PitchEditor-Windows-CPU\* -DestinationPath PitchEditor-Windows-CPU.zip -Force
+          Copy-Item build/PitchEditor_artefacts/Release/*.dll -Destination package/PitchEditor-Windows-CPU/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse build/PitchEditor_artefacts/Release/models -Destination package/PitchEditor-Windows-CPU/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse build/PitchEditor_artefacts/Release/lang -Destination package/PitchEditor-Windows-CPU/ -ErrorAction SilentlyContinue
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -66,7 +46,7 @@ jobs:
           name: PitchEditor-Windows-CPU
           path: package/PitchEditor-Windows-CPU
 
-  build-windows-dml:
+  build-windows-directml:
     runs-on: windows-latest
 
     steps:
@@ -78,22 +58,12 @@ jobs:
       - name: Setup MSVC
         uses: microsoft/setup-msbuild@v1.1
 
-      - name: Cache JUCE
-        id: cache-juce
-        uses: actions/cache@v3
-        with:
-          path: JUCE
-          key: juce-windows-${{ hashFiles('CMakeLists.txt') }}
-
-      - name: Clone JUCE
-        if: steps.cache-juce.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch 7.0.9 https://github.com/juce-framework/JUCE.git
-
       - name: Download ONNX Runtime DirectML
         run: |
+          # Download CPU version for headers
           Invoke-WebRequest -Uri "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-win-x64-${{ env.ONNX_VERSION }}.zip" -OutFile "onnxruntime-cpu.zip"
           Expand-Archive -Path "onnxruntime-cpu.zip" -DestinationPath "."
+          # Download DirectML version
           Invoke-WebRequest -Uri "https://www.nuget.org/api/v2/package/Microsoft.ML.OnnxRuntime.DirectML/${{ env.ONNX_VERSION }}" -OutFile "onnxruntime-dml.nupkg"
           Rename-Item "onnxruntime-dml.nupkg" "onnxruntime-dml.zip"
           Expand-Archive -Path "onnxruntime-dml.zip" -DestinationPath "onnxruntime-dml-nuget"
@@ -102,20 +72,17 @@ jobs:
           Rename-Item "directml.nupkg" "directml.zip"
           Expand-Archive -Path "directml.zip" -DestinationPath "directml-nuget"
           # Create merged onnxruntime directory
-          New-Item -ItemType Directory -Force -Path onnxruntime
-          Copy-Item -Recurse "onnxruntime-win-x64-${{ env.ONNX_VERSION }}/include" onnxruntime/
           New-Item -ItemType Directory -Force -Path onnxruntime/lib
+          Copy-Item -Recurse "onnxruntime-win-x64-${{ env.ONNX_VERSION }}/include" onnxruntime/
           Copy-Item "onnxruntime-dml-nuget/runtimes/win-x64/native/onnxruntime.dll" onnxruntime/lib/
           Copy-Item "onnxruntime-dml-nuget/runtimes/win-x64/native/onnxruntime.lib" onnxruntime/lib/
           Copy-Item "directml-nuget/bin/x64-win/DirectML.dll" onnxruntime/lib/
 
       - name: Configure CMake
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DONNXRUNTIME_ROOT="./onnxruntime"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DONNXRUNTIME_ROOT="./onnxruntime"
 
       - name: Build
-        run: |
-          cmake --build build --config ${{ env.BUILD_TYPE }}
+        run: cmake --build build --config ${{ env.BUILD_TYPE }}
 
       - name: Package
         run: |
@@ -123,8 +90,8 @@ jobs:
           Copy-Item "build/PitchEditor_artefacts/Release/Pitch Editor.exe" -Destination "package/PitchEditor-Windows-DirectML/PitchEditor.exe"
           Copy-Item onnxruntime/lib/onnxruntime.dll -Destination package/PitchEditor-Windows-DirectML/
           Copy-Item onnxruntime/lib/DirectML.dll -Destination package/PitchEditor-Windows-DirectML/
-          Copy-Item -Recurse models -Destination package/PitchEditor-Windows-DirectML/
-          Compress-Archive -Path package/PitchEditor-Windows-DirectML\* -DestinationPath PitchEditor-Windows-DirectML.zip -Force
+          Copy-Item -Recurse build/PitchEditor_artefacts/Release/models -Destination package/PitchEditor-Windows-DirectML/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse build/PitchEditor_artefacts/Release/lang -Destination package/PitchEditor-Windows-DirectML/ -ErrorAction SilentlyContinue
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -132,61 +99,43 @@ jobs:
           name: PitchEditor-Windows-DirectML
           path: package/PitchEditor-Windows-DirectML
 
-  # build-macos:
-  #   runs-on: macos-latest
+  build-windows-cuda:
+    runs-on: windows-latest
 
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #       with:
-  #         submodules: recursive
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-  #     - name: Cache JUCE
-  #       id: cache-juce
-  #       uses: actions/cache@v3
-  #       with:
-  #         path: JUCE
-  #         key: juce-macos-${{ hashFiles('CMakeLists.txt') }}
+      - name: Setup MSVC
+        uses: microsoft/setup-msbuild@v1.1
 
-  #     - name: Clone JUCE
-  #       if: steps.cache-juce.outputs.cache-hit != 'true'
-  #       run: |
-  #         git clone --depth 1 --branch 7.0.9 https://github.com/juce-framework/JUCE.git
+      - name: Download ONNX Runtime CUDA
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-win-x64-gpu-${{ env.ONNX_VERSION }}.zip" -OutFile "onnxruntime-gpu.zip"
+          Expand-Archive -Path "onnxruntime-gpu.zip" -DestinationPath "."
+          Rename-Item "onnxruntime-win-x64-gpu-${{ env.ONNX_VERSION }}" "onnxruntime"
 
-  #     - name: Download ONNX Runtime
-  #       run: |
-  #         curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-osx-universal2-${{ env.ONNX_VERSION }}.tgz" -o onnxruntime.tgz
-  #         tar -xzf onnxruntime.tgz
-  #         mv onnxruntime-osx-universal2-${{ env.ONNX_VERSION }} onnxruntime
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DUSE_GPU=ON -DONNXRUNTIME_ROOT="./onnxruntime"
 
-  #     - name: Configure CMake
-  #       run: |
-  #         cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DONNXRUNTIME_ROOT="./onnxruntime"
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }}
 
-  #     - name: Build
-  #       run: |
-  #         cmake --build build --config ${{ env.BUILD_TYPE }}
+      - name: Package
+        run: |
+          New-Item -ItemType Directory -Force -Path package/PitchEditor-Windows-CUDA
+          Copy-Item "build/PitchEditor_artefacts/Release/Pitch Editor.exe" -Destination "package/PitchEditor-Windows-CUDA/PitchEditor.exe"
+          Copy-Item onnxruntime/lib/*.dll -Destination package/PitchEditor-Windows-CUDA/
+          Copy-Item -Recurse build/PitchEditor_artefacts/Release/models -Destination package/PitchEditor-Windows-CUDA/ -ErrorAction SilentlyContinue
+          Copy-Item -Recurse build/PitchEditor_artefacts/Release/lang -Destination package/PitchEditor-Windows-CUDA/ -ErrorAction SilentlyContinue
 
-  #     - name: Package
-  #       run: |
-  #         mkdir -p package
-  #         APP_PATH=$(find build -name "PitchEditor.app" -type d | head -1)
-  #         if [ -n "$APP_PATH" ]; then
-  #           cp -r "$APP_PATH" package/
-  #         fi
-  #         mkdir -p package/PitchEditor.app/Contents/Frameworks
-  #         cp onnxruntime/lib/libonnxruntime*.dylib package/PitchEditor.app/Contents/Frameworks/
-  #         mkdir -p package/PitchEditor.app/Contents/Resources/models
-  #         cp models/pc_nsf_hifigan.onnx package/PitchEditor.app/Contents/Resources/models/
-  #         install_name_tool -add_rpath @executable_path/../Frameworks package/PitchEditor.app/Contents/MacOS/PitchEditor || true
-  #         cd package
-  #         zip -r ../PitchEditor-macOS.zip PitchEditor.app
-
-  #     - name: Upload Artifact
-  #       uses: actions/upload-artifact@v4
-  #       with:
-  #         name: PitchEditor-macOS
-  #         path: PitchEditor-macOS.zip
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PitchEditor-Windows-CUDA
+          path: package/PitchEditor-Windows-CUDA
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -216,59 +165,27 @@ jobs:
             libglu1-mesa-dev \
             mesa-common-dev
 
-      - name: Cache JUCE
-        id: cache-juce
-        uses: actions/cache@v3
-        with:
-          path: JUCE
-          key: juce-linux-${{ hashFiles('CMakeLists.txt') }}
-
-      - name: Clone JUCE
-        if: steps.cache-juce.outputs.cache-hit != 'true'
-        run: |
-          git clone --depth 1 --branch 7.0.9 https://github.com/juce-framework/JUCE.git
-
-      - name: Download ONNX Runtime
-        run: |
-          curl -L "https://github.com/microsoft/onnxruntime/releases/download/v${{ env.ONNX_VERSION }}/onnxruntime-linux-x64-${{ env.ONNX_VERSION }}.tgz" -o onnxruntime.tgz
-          tar -xzf onnxruntime.tgz
-          mv onnxruntime-linux-x64-${{ env.ONNX_VERSION }} onnxruntime
-
       - name: Configure CMake
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} -DONNXRUNTIME_ROOT="./onnxruntime"
+        run: cmake -B build -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
 
       - name: Build
-        run: |
-          cmake --build build --config ${{ env.BUILD_TYPE }}
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(nproc)
 
       - name: Package
         run: |
           mkdir -p package/PitchEditor-Linux
-          # Find possible executable names (handles 'PitchEditor' and 'Pitch Editor')
-          EXE_PATH=$(find build -type f \( -name "PitchEditor" -o -name "Pitch Editor" -o -name "PitchEditor.exe" -o -name "Pitch Editor.exe" \) -executable | head -1)
-          if [ -n "$EXE_PATH" ]; then
-            cp "$EXE_PATH" package/PitchEditor-Linux/PitchEditor
-          else
-            echo "Warning: PitchEditor executable not found. Packaging only libraries and models."
-          fi
-          cp onnxruntime/lib/libonnxruntime.so* package/PitchEditor-Linux/ || true
-          cp -r models package/PitchEditor-Linux/
+          cp "build/PitchEditor_artefacts/Release/Pitch Editor" package/PitchEditor-Linux/PitchEditor || true
+          cp build/PitchEditor_artefacts/Release/*.so* package/PitchEditor-Linux/ 2>/dev/null || true
+          cp -r build/PitchEditor_artefacts/Release/models package/PitchEditor-Linux/ 2>/dev/null || true
+          cp -r build/PitchEditor_artefacts/Release/lang package/PitchEditor-Linux/ 2>/dev/null || true
           cat > package/PitchEditor-Linux/run.sh << 'EOF'
           #!/bin/bash
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
           export LD_LIBRARY_PATH="$SCRIPT_DIR:$LD_LIBRARY_PATH"
-          if [ -x "$SCRIPT_DIR/PitchEditor" ]; then
-            "$SCRIPT_DIR/PitchEditor" "$@"
-          else
-            echo "Error: PitchEditor executable not found in package."
-            exit 1
-          fi
+          "$SCRIPT_DIR/PitchEditor" "$@"
           EOF
-          chmod +x package/PitchEditor-Linux/run.sh
-          if [ -f package/PitchEditor-Linux/PitchEditor ]; then chmod +x package/PitchEditor-Linux/PitchEditor; fi
-          cd package
-          tar -czvf ../PitchEditor-Linux.tar.gz PitchEditor-Linux
+          chmod +x package/PitchEditor-Linux/run.sh package/PitchEditor-Linux/PitchEditor
+          cd package && tar -czvf ../PitchEditor-Linux.tar.gz PitchEditor-Linux
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -277,7 +194,7 @@ jobs:
           path: PitchEditor-Linux.tar.gz
 
   release:
-    needs: [build-windows-cpu, build-windows-dml, build-linux]
+    needs: [build-windows-cpu, build-windows-directml, build-windows-cuda, build-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
 
@@ -289,29 +206,20 @@ jobs:
 
       - name: Prepare release files
         run: |
-          set -e
-          cd artifacts || exit 0
-          if [ -d "PitchEditor-Windows-CPU" ] && [ ! -f "PitchEditor-Windows-CPU.zip" ]; then
-            zip -r PitchEditor-Windows-CPU.zip PitchEditor-Windows-CPU
-          fi
-          if [ -d "PitchEditor-Windows-DirectML" ] && [ ! -f "PitchEditor-Windows-DirectML.zip" ]; then
-            zip -r PitchEditor-Windows-DirectML.zip PitchEditor-Windows-DirectML
-          fi
-          if [ -d "PitchEditor-macOS" ] && [ ! -f "PitchEditor-macOS.zip" ]; then
-            zip -r PitchEditor-macOS.zip PitchEditor-macOS || true
-          fi
-          if [ -d "PitchEditor-Linux" ] && [ ! -f "PitchEditor-Linux.tar.gz" ]; then
-            tar -czvf PitchEditor-Linux.tar.gz PitchEditor-Linux || true
-          fi
+          cd artifacts
+          [ -d "PitchEditor-Windows-CPU" ] && zip -r PitchEditor-Windows-CPU.zip PitchEditor-Windows-CPU || true
+          [ -d "PitchEditor-Windows-DirectML" ] && zip -r PitchEditor-Windows-DirectML.zip PitchEditor-Windows-DirectML || true
+          [ -d "PitchEditor-Windows-CUDA" ] && zip -r PitchEditor-Windows-CUDA.zip PitchEditor-Windows-CUDA || true
+          [ -d "PitchEditor-Linux" ] && mv PitchEditor-Linux/*.tar.gz . || true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            artifacts/PitchEditor-Windows-CPU/PitchEditor-Windows-CPU.zip
-            artifacts/PitchEditor-Windows-DirectML/PitchEditor-Windows-DirectML.zip
-            artifacts/PitchEditor-macOS/PitchEditor-macOS.zip
-            artifacts/PitchEditor-Linux/PitchEditor-Linux.tar.gz
+            artifacts/PitchEditor-Windows-CPU.zip
+            artifacts/PitchEditor-Windows-DirectML.zip
+            artifacts/PitchEditor-Windows-CUDA.zip
+            artifacts/PitchEditor-Linux.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true

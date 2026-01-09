@@ -2,8 +2,7 @@
 build/
 cmake-build-*/
 
-# JUCE (should be cloned locally)
-JUCE/
+# JUCE is now a git submodule in third_party/
 
 # IDE files
 .vs/
