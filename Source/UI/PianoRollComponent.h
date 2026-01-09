@@ -121,7 +121,10 @@ private:
     Note* draggedNote = nullptr;
     float dragStartY = 0.0f;
     float originalPitchOffset = 0.0f;
-    float lastAppliedOffset = 0.0f;  // Track incremental F0 changes during drag
+    float originalMidiNote = 60.0f;  // Original MIDI note before drag
+    float boundaryF0Start = 0.0f;    // F0 value before note start (for smooth transition)
+    float boundaryF0End = 0.0f;      // F0 value after note end (for smooth transition)
+    std::vector<float> originalF0Values;  // F0 values before drag for undo
     
     // Pitch drawing state
     bool isDrawing = false;

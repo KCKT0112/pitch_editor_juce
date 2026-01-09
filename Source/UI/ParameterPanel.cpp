@@ -4,20 +4,6 @@
 
 ParameterPanel::ParameterPanel()
 {
-    // Loading status label
-    addAndMakeVisible(loadingStatusLabel);
-    loadingStatusLabel.setColour(juce::Label::textColourId, juce::Colour(0xFFFFD700));
-    loadingStatusLabel.setColour(juce::Label::backgroundColourId, juce::Colour(0x40000000));
-    loadingStatusLabel.setJustificationType(juce::Justification::centred);
-    loadingStatusLabel.setFont(juce::Font(13.0f, juce::Font::bold));
-    loadingStatusLabel.setVisible(false);
-
-    // Progress bar
-    addAndMakeVisible(progressBar);
-    progressBar.setColour(juce::ProgressBar::foregroundColourId, juce::Colour(COLOR_PRIMARY));
-    progressBar.setColour(juce::ProgressBar::backgroundColourId, juce::Colour(0xFF2D2D37));
-    progressBar.setVisible(false);
-
     // Note info
     addAndMakeVisible(noteInfoLabel);
     noteInfoLabel.setColour(juce::Label::textColourId, juce::Colours::white);
@@ -68,7 +54,6 @@ ParameterPanel::ParameterPanel()
 ParameterPanel::~ParameterPanel()
 {
     vibratoEnableButton.setLookAndFeel(nullptr);
-    stopTimer();
 }
 
 void ParameterPanel::setupSlider(juce::Slider& slider, juce::Label& label,
@@ -109,12 +94,7 @@ void ParameterPanel::paint(juce::Graphics& g)
 void ParameterPanel::resized()
 {
     auto bounds = getLocalBounds().reduced(10);
-    
-    // Loading status at top
-    loadingStatusLabel.setBounds(bounds.removeFromTop(24));
-    progressBar.setBounds(bounds.removeFromTop(10));
-    bounds.removeFromTop(5);
-    
+
     // Note info
     noteInfoLabel.setBounds(bounds.removeFromTop(30));
     bounds.removeFromTop(10);
@@ -290,7 +270,7 @@ void ParameterPanel::updateFromNote()
 void ParameterPanel::updateGlobalSliders()
 {
     isUpdating = true;
-    
+
     if (project)
     {
         globalPitchSlider.setValue(project->getGlobalPitchOffset());
@@ -301,38 +281,6 @@ void ParameterPanel::updateGlobalSliders()
         globalPitchSlider.setValue(0.0);
         globalPitchSlider.setEnabled(false);
     }
-    
+
     isUpdating = false;
-}
-
-void ParameterPanel::timerCallback()
-{
-    // Timer for animating indeterminate progress bar
-    repaint();
-}
-
-void ParameterPanel::setLoadingStatus(const juce::String& status)
-{
-    loadingStatusLabel.setText(status, juce::dontSendNotification);
-    loadingStatusLabel.setVisible(true);
-    progressBar.setVisible(true);
-    progressValue = -1.0;  // Indeterminate mode
-    isLoading = true;
-    startTimerHz(30);  // Animate the progress bar
-    repaint();
-}
-
-void ParameterPanel::setLoadingProgress(double progress)
-{
-    progressValue = progress;
-    repaint();
-}
-
-void ParameterPanel::clearLoadingStatus()
-{
-    loadingStatusLabel.setVisible(false);
-    progressBar.setVisible(false);
-    isLoading = false;
-    stopTimer();
-    repaint();
 }

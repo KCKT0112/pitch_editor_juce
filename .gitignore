@@ -33,3 +33,5 @@ cmake-build-*/
 *.log
 
 **/__pycache__/
+Resources/models/*.onnx
+Resources/models/*.bin

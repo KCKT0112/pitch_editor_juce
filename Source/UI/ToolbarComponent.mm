@@ -91,6 +91,12 @@ ToolbarComponent::ToolbarComponent()
     progressLabel.setJustificationType(juce::Justification::centredLeft);
     progressBar.setColour(juce::ProgressBar::foregroundColourId, juce::Colour(COLOR_PRIMARY));
     progressBar.setColour(juce::ProgressBar::backgroundColourId, juce::Colour(0xFF2D2D37));
+
+    // Sidebar toggle button
+    addAndMakeVisible(sidebarToggleButton);
+    sidebarToggleButton.addListener(this);
+    sidebarToggleButton.setColour(juce::TextButton::buttonColourId, juce::Colour(0xFF3D3D47));
+    sidebarToggleButton.setColour(juce::TextButton::textColourOffId, juce::Colours::white);
 }
 
 ToolbarComponent::~ToolbarComponent()
@@ -142,19 +148,26 @@ void ToolbarComponent::resized()
     timeLabel.setBounds(bounds.removeFromLeft(180));
     bounds.removeFromLeft(20);
 
-    // Right side - zoom (slider on right, label before it)
+    // Right side - sidebar toggle button (rightmost)
+    sidebarToggleButton.setBounds(bounds.removeFromRight(32));
+    bounds.removeFromRight(8);
+
+    // Zoom slider and label
     zoomSlider.setBounds(bounds.removeFromRight(150));
     bounds.removeFromRight(4);
     zoomLabel.setBounds(bounds.removeFromRight(50));
 
-    // Progress bar (use the remaining middle area so it won't cover buttons)
+    // Progress bar (narrower, in remaining middle area)
     if (showingProgress)
     {
         auto progressArea = bounds;
-        if (progressArea.getWidth() < 220)
-            progressArea = getLocalBounds().reduced(200, 6);
+        progressArea.removeFromLeft(10);
+        progressArea.removeFromRight(10);
 
-        const int labelWidth = std::min(160, std::max(80, progressArea.getWidth() / 4));
+        if (progressArea.getWidth() > 200)
+            progressArea = progressArea.withWidth(200);  // Max width 200px
+
+        const int labelWidth = 80;
         progressLabel.setBounds(progressArea.removeFromLeft(labelWidth));
         progressBar.setBounds(progressArea);
     }
@@ -200,6 +213,12 @@ void ToolbarComponent::buttonClicked(juce::Button* button)
     else if (button == &followButton)
     {
         followPlayback = followButton.getToggleState();
+    }
+    else if (button == &sidebarToggleButton)
+    {
+        sidebarVisible = !sidebarVisible;
+        if (onToggleSidebar)
+            onToggleSidebar(sidebarVisible);
     }
 }
 

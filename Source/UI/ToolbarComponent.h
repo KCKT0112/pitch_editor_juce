@@ -49,6 +49,7 @@ public:
     // Plugin mode callbacks
     std::function<void()> onReanalyze;
     std::function<void()> onRender;
+    std::function<void(bool)> onToggleSidebar;  // Called with new visibility state
 
 private:
     void updateTimeDisplay();
@@ -79,6 +80,10 @@ private:
     juce::ProgressBar progressBar { progressValue };
     juce::Label progressLabel;
     bool showingProgress = false;
+
+    // Sidebar toggle
+    juce::TextButton sidebarToggleButton { "≡" };
+    bool sidebarVisible = false;
     
     double currentTime = 0.0;
     double totalTime = 0.0;

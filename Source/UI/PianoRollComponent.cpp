@@ -415,7 +415,7 @@ void PianoRollComponent::drawPitchCurves(juce::Graphics &g) {
       float adjustedF0 = f0 * std::pow(2.0f, frameOffsets[i] / 12.0f);
       float midi = freqToMidi(adjustedF0);
       float x = framesToSeconds(static_cast<int>(i)) * pixelsPerSecond;
-      float y = midiToY(midi);
+      float y = midiToY(midi) + pixelsPerSemitone * 0.5f;  // Center in row
 
       if (!pathStarted) {
         path.startNewSubPath(x, y);
@@ -551,20 +551,52 @@ void PianoRollComponent::mouseDown(const juce::MouseEvent &e) {
     if (onNoteSelected)
       onNoteSelected(note);
 
-    // Re-infer UV (unvoiced) regions using FCPE before starting drag
-    // This ensures smooth pitch transitions when transposing
-    int startFrame = note->getStartFrame();
-    int endFrame = note->getEndFrame();
-    if (onReinterpolateUV)
-      onReinterpolateUV(startFrame, endFrame);
+    // Calculate delta pitch before starting drag (if not already calculated)
+    if (!note->hasDeltaPitch() && project)
+    {
+        auto& audioData = project->getAudioData();
+        int startFrame = note->getStartFrame();
+        int endFrame = note->getEndFrame();
+        int numFrames = endFrame - startFrame;
+
+        std::vector<float> delta(numFrames, 0.0f);
+        float baseMidi = note->getMidiNote();
+
+        for (int i = 0; i < numFrames; ++i)
+        {
+            int globalFrame = startFrame + i;
+            if (globalFrame < static_cast<int>(audioData.f0.size()) && audioData.f0[globalFrame] > 0.0f)
+            {
+                float f0Midi = freqToMidi(audioData.f0[globalFrame]);
+                delta[i] = f0Midi - baseMidi;
+            }
+        }
+        note->setDeltaPitch(std::move(delta));
+    }
 
     // Start dragging
     isDragging = true;
     draggedNote = note;
     dragStartY = static_cast<float>(e.y);
     originalPitchOffset = note->getPitchOffset();
-    lastAppliedOffset =
-        originalPitchOffset; // Initialize for incremental F0 updates
+    originalMidiNote = note->getMidiNote();
+
+    // Save boundary F0 values and original F0 for undo
+    if (project)
+    {
+        auto& audioData = project->getAudioData();
+        int startFrame = note->getStartFrame();
+        int endFrame = note->getEndFrame();
+        int f0Size = static_cast<int>(audioData.f0.size());
+
+        boundaryF0Start = (startFrame > 0 && startFrame - 1 < f0Size) ? audioData.f0[startFrame - 1] : 0.0f;
+        boundaryF0End = (endFrame < f0Size) ? audioData.f0[endFrame] : 0.0f;
+
+        // Save original F0 values for undo
+        originalF0Values.clear();
+        for (int i = startFrame; i < endFrame && i < f0Size; ++i)
+            originalF0Values.push_back(audioData.f0[i]);
+    }
 
     repaint();
   } else {
@@ -599,38 +631,10 @@ void PianoRollComponent::mouseDrag(const juce::MouseEvent &e) {
     float deltaY = dragStartY - e.y;
     float deltaSemitones = deltaY / pixelsPerSemitone;
 
-    float newOffset = originalPitchOffset + deltaSemitones;
-
-    // Store old offset for undo if just starting drag
-    if (undoManager && std::abs(newOffset - originalPitchOffset) > 0.01f) {
-      // Note: We'll create the undo action in mouseUp
-    }
-
-    draggedNote->setPitchOffset(newOffset);
-
-    // Also update the actual F0 values in audioData to match the visual change
-    if (project) {
-      auto &audioData = project->getAudioData();
-      int startFrame = draggedNote->getStartFrame();
-      int endFrame = draggedNote->getEndFrame();
-
-      // Calculate the pitch ratio for this drag
-      float ratio = std::pow(2.0f, (newOffset - lastAppliedOffset) / 12.0f);
-
-      for (int i = startFrame;
-           i < endFrame && i < static_cast<int>(audioData.f0.size()); ++i) {
-        if (audioData.f0[i] > 0.0f) {
-          audioData.f0[i] *= ratio;
-        }
-      }
-
-      lastAppliedOffset = newOffset;
-
-      // Set F0 dirty range for synthesis
-      project->setF0DirtyRange(startFrame, endFrame);
-    }
-
-    draggedNote->markDirty(); // Mark as dirty for incremental synthesis
+    // Update pitch offset (visual feedback during drag)
+    // The actual F0 values will be updated in mouseUp
+    draggedNote->setPitchOffset(deltaSemitones);
+    draggedNote->markDirty();
 
     if (onPitchEdited)
       onPitchEdited();
@@ -651,13 +655,82 @@ void PianoRollComponent::mouseUp(const juce::MouseEvent &e) {
 
   if (isDragging && draggedNote) {
     float newOffset = draggedNote->getPitchOffset();
+    int startFrame = draggedNote->getStartFrame();
+    int endFrame = draggedNote->getEndFrame();
 
-    // Update the note's midiNote to reflect the new pitch
-    if (std::abs(newOffset - originalPitchOffset) > 0.001f) {
-      float deltaSemitones = newOffset - originalPitchOffset;
-      draggedNote->setMidiNote(draggedNote->getMidiNote() + deltaSemitones);
-      draggedNote->setPitchOffset(
-          0.0f); // Reset offset since F0 was already modified
+    // Update the note's midiNote and F0 values
+    if (std::abs(newOffset) > 0.001f && project) {
+      auto& audioData = project->getAudioData();
+      int f0Size = static_cast<int>(audioData.f0.size());
+
+      // Update F0 values using delta pitch model
+      if (draggedNote->hasDeltaPitch()) {
+        const auto& delta = draggedNote->getDeltaPitch();
+        float newBaseMidi = originalMidiNote + newOffset;
+
+        for (int i = startFrame; i < endFrame && i < f0Size; ++i) {
+          int localIdx = i - startFrame;
+          float d = (localIdx < static_cast<int>(delta.size())) ? delta[localIdx] : 0.0f;
+          audioData.f0[i] = midiToFreq(newBaseMidi + d);
+        }
+
+        // Set F0 dirty range for synthesis
+        project->setF0DirtyRange(startFrame, endFrame);
+      }
+
+      // Create undo action before updating note
+      if (undoManager) {
+        std::vector<F0FrameEdit> f0Edits;
+        for (int i = startFrame; i < endFrame && i < f0Size; ++i) {
+          int localIdx = i - startFrame;
+          F0FrameEdit edit;
+          edit.idx = i;
+          edit.oldF0 = (localIdx < static_cast<int>(originalF0Values.size())) ? originalF0Values[localIdx] : 0.0f;
+          edit.newF0 = audioData.f0[i];
+          f0Edits.push_back(edit);
+        }
+        auto action = std::make_unique<NotePitchDragAction>(
+            draggedNote, &audioData.f0,
+            originalMidiNote, originalMidiNote + newOffset,
+            std::move(f0Edits));
+        undoManager->addAction(std::move(action));
+      }
+
+      // Update base MIDI note
+      draggedNote->setMidiNote(originalMidiNote + newOffset);
+      // Reset offset since base note was updated
+      draggedNote->setPitchOffset(0.0f);
+
+      // Apply Gaussian smoothing at boundaries
+      auto smoothBoundary = [&](int centerFrame) {
+        if (centerFrame < 5 || centerFrame >= f0Size - 5)
+          return;
+
+        constexpr float weights[] = {0.06f, 0.12f, 0.18f, 0.28f, 0.18f, 0.12f, 0.06f};
+        float original[7];
+        for (int i = -3; i <= 3; ++i) {
+          int idx = centerFrame + i;
+          original[i + 3] = (idx >= 0 && idx < f0Size) ? audioData.f0[idx] : 0.0f;
+        }
+
+        for (int i = -3; i <= 3; ++i) {
+          int idx = centerFrame + i;
+          if (idx >= 0 && idx < f0Size && original[i + 3] > 0) {
+            float sum = 0.0f, weightSum = 0.0f;
+            for (int j = -3; j <= 3; ++j) {
+              if (original[j + 3] > 0) {
+                sum += original[j + 3] * weights[j + 3];
+                weightSum += weights[j + 3];
+              }
+            }
+            if (weightSum > 0)
+              audioData.f0[idx] = sum / weightSum;
+          }
+        }
+      };
+
+      smoothBoundary(startFrame);
+      smoothBoundary(endFrame);
     }
 
     // Trigger incremental synthesis when pitch edit is finished

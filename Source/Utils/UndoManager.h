@@ -56,7 +56,7 @@ public:
                  std::vector<bool>* voicedMask,
                  std::vector<F0FrameEdit> edits)
         : f0Array(f0Array), voicedMask(voicedMask), edits(std::move(edits)) {}
-    
+
     void undo() override
     {
         if (!f0Array) return;
@@ -68,7 +68,7 @@ public:
                 (*voicedMask)[e.idx] = e.oldVoiced;
         }
     }
-    
+
     void redo() override
     {
         if (!f0Array) return;
@@ -80,13 +80,63 @@ public:
                 (*voicedMask)[e.idx] = e.newVoiced;
         }
     }
-    
+
     juce::String getName() const override { return "Edit Pitch Curve"; }
-    
+
 private:
     std::vector<float>* f0Array;
     std::vector<bool>* voicedMask;
     std::vector<F0FrameEdit> edits;
+};
+
+/**
+ * Action for dragging a note to change pitch (MIDI note + F0 values).
+ */
+class NotePitchDragAction : public UndoableAction
+{
+public:
+    NotePitchDragAction(Note* note, std::vector<float>* f0Array,
+                        float oldMidi, float newMidi,
+                        std::vector<F0FrameEdit> f0Edits)
+        : note(note), f0Array(f0Array), oldMidi(oldMidi), newMidi(newMidi),
+          f0Edits(std::move(f0Edits)) {}
+
+    void undo() override
+    {
+        if (note) {
+            note->setMidiNote(oldMidi);
+            note->markDirty();
+        }
+        if (f0Array) {
+            for (const auto& e : f0Edits) {
+                if (e.idx >= 0 && e.idx < static_cast<int>(f0Array->size()))
+                    (*f0Array)[e.idx] = e.oldF0;
+            }
+        }
+    }
+
+    void redo() override
+    {
+        if (note) {
+            note->setMidiNote(newMidi);
+            note->markDirty();
+        }
+        if (f0Array) {
+            for (const auto& e : f0Edits) {
+                if (e.idx >= 0 && e.idx < static_cast<int>(f0Array->size()))
+                    (*f0Array)[e.idx] = e.newF0;
+            }
+        }
+    }
+
+    juce::String getName() const override { return "Drag Note Pitch"; }
+
+private:
+    Note* note;
+    std::vector<float>* f0Array;
+    float oldMidi;
+    float newMidi;
+    std::vector<F0FrameEdit> f0Edits;
 };
 
 /**

@@ -9,8 +9,7 @@ class DarkLookAndFeel;  // Forward declaration
 
 class ParameterPanel : public juce::Component,
                        public juce::Slider::Listener,
-                       public juce::Button::Listener,
-                       public juce::Timer
+                       public juce::Button::Listener
 {
 public:
     ParameterPanel();
@@ -22,36 +21,24 @@ public:
     void sliderValueChanged(juce::Slider* slider) override;
     void sliderDragEnded(juce::Slider* slider) override;
     void buttonClicked(juce::Button* button) override;
-    void timerCallback() override;
-    
+
     void setProject(Project* proj);
     void setSelectedNote(Note* note);
     void updateFromNote();
     void updateGlobalSliders();
-
-    // Loading status with progress bar
-    void setLoadingStatus(const juce::String& status);
-    void setLoadingProgress(double progress);  // 0.0 to 1.0, or -1 for indeterminate
-    void clearLoadingStatus();
     
     std::function<void()> onParameterChanged;
     std::function<void()> onParameterEditFinished;  // Called when slider drag ends
     std::function<void()> onGlobalPitchChanged;
     
 private:
-    void setupSlider(juce::Slider& slider, juce::Label& label, 
+    void setupSlider(juce::Slider& slider, juce::Label& label,
                     const juce::String& name, double min, double max, double def);
-    
+
     Project* project = nullptr;
     Note* selectedNote = nullptr;
     bool isUpdating = false;  // Prevent feedback loops
-    
-    // Loading status with indeterminate progress
-    juce::Label loadingStatusLabel;
-    double progressValue = -1.0;  // -1 for indeterminate - must be before progressBar
-    juce::ProgressBar progressBar { progressValue };
-    bool isLoading = false;
-    
+
     // Note info
     juce::Label noteInfoLabel;
     

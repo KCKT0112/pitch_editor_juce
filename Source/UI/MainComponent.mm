@@ -21,6 +21,7 @@ MainComponent::MainComponent(bool enableAudioDevice)
         audioEngine = std::make_unique<AudioEngine>();
     pitchDetector = std::make_unique<PitchDetector>();
     fcpePitchDetector = std::make_unique<FCPEPitchDetector>();
+    someDetector = std::make_unique<SOMEDetector>();
     vocoder = std::make_unique<Vocoder>();
     undoManager = std::make_unique<PitchUndoManager>(100);
     
@@ -31,7 +32,7 @@ MainComponent::MainComponent(bool enableAudioDevice)
     auto fcpeModelPath = modelsDir.getChildFile("fcpe.onnx");
     auto melFilterbankPath = modelsDir.getChildFile("mel_filterbank.bin");
     auto centTablePath = modelsDir.getChildFile("cent_table.bin");
-    
+
     if (fcpeModelPath.existsAsFile())
     {
         if (fcpePitchDetector->loadModel(fcpeModelPath, melFilterbankPath, centTablePath))
@@ -51,7 +52,25 @@ MainComponent::MainComponent(bool enableAudioDevice)
         DBG("Using YIN pitch detector as fallback");
         useFCPE = false;
     }
-    
+
+    // Try to load SOME model for note segmentation
+    auto someModelPath = modelsDir.getChildFile("some.onnx");
+    if (someModelPath.existsAsFile())
+    {
+        if (someDetector->loadModel(someModelPath))
+        {
+            DBG("SOME note detector loaded successfully");
+        }
+        else
+        {
+            DBG("Failed to load SOME model");
+        }
+    }
+    else
+    {
+        DBG("SOME model not found at: " + someModelPath.getFullPathName());
+    }
+
     // Load vocoder settings
     applySettings();
     
@@ -73,7 +92,7 @@ MainComponent::MainComponent(bool enableAudioDevice)
 #endif
     addAndMakeVisible(toolbar);
     addAndMakeVisible(pianoRoll);
-    addAndMakeVisible(parameterPanel);
+    addChildComponent(parameterPanel);  // Hidden by default
 
     // Configure toolbar for plugin mode
     if (isPluginMode())
@@ -102,6 +121,10 @@ MainComponent::MainComponent(bool enableAudioDevice)
     };
     toolbar.onRender = [this]() {
         renderProcessedAudio();
+    };
+    toolbar.onToggleSidebar = [this](bool visible) {
+        parameterPanel.setVisible(visible);
+        resized();
     };
 
     // Setup piano roll callbacks
@@ -225,8 +248,9 @@ void MainComponent::resized()
     // Toolbar at top
     toolbar.setBounds(bounds.removeFromTop(40));
 
-    // Parameter panel on right
-    parameterPanel.setBounds(bounds.removeFromRight(250));
+    // Parameter panel on right (only if visible)
+    if (parameterPanel.isVisible())
+        parameterPanel.setBounds(bounds.removeFromRight(250));
 
     // Piano roll takes remaining space
     pianoRoll.setBounds(bounds);
@@ -295,7 +319,6 @@ void MainComponent::timerCallback()
         if (msg.isNotEmpty() && msg != lastLoadingMessage)
         {
             toolbar.showProgress(msg);
-            parameterPanel.setLoadingStatus(msg);
             lastLoadingMessage = msg;
         }
 
@@ -305,7 +328,6 @@ void MainComponent::timerCallback()
     if (lastLoadingMessage.isNotEmpty())
     {
         toolbar.hideProgress();
-        parameterPanel.clearLoadingStatus();
         lastLoadingMessage.clear();
     }
 }
@@ -424,14 +446,12 @@ void MainComponent::saveProject()
 
             toolbar.showProgress("Saving...");
             toolbar.setProgress(-1.0f);
-            parameterPanel.setLoadingStatus("Saving...");
 
             const bool ok = project->saveToFile(file);
             if (ok)
                 project->setProjectFilePath(file);
 
             toolbar.hideProgress();
-            parameterPanel.clearLoadingStatus();
         });
 
         return;
@@ -439,13 +459,11 @@ void MainComponent::saveProject()
 
     toolbar.showProgress("Saving...");
     toolbar.setProgress(-1.0f);
-    parameterPanel.setLoadingStatus("Saving...");
 
     const bool ok = project->saveToFile(target);
     juce::ignoreUnused(ok);
 
     toolbar.hideProgress();
-    parameterPanel.clearLoadingStatus();
 }
 
 void MainComponent::openFile()
@@ -483,7 +501,6 @@ void MainComponent::loadAudioFile(const juce::File& file)
     }
     toolbar.showProgress("Loading audio...");
     toolbar.setProgress(0.0f);
-    parameterPanel.setLoadingStatus("Loading audio...");
 
     if (loaderThread.joinable())
         loaderThread.join();
@@ -933,7 +950,8 @@ void MainComponent::resynthesizeIncremental()
     
     // Disable toolbar during synthesis
     toolbar.setEnabled(false);
-    parameterPanel.setLoadingStatus("Preview...");
+    toolbar.showProgress("Preview...");
+    toolbar.setProgress(-1.0f);
     
     // Calculate sample positions
     int hopSize = vocoder->getHopSize();
@@ -962,7 +980,7 @@ void MainComponent::resynthesizeIncremental()
             }
 
             safeThis->toolbar.setEnabled(true);
-            safeThis->parameterPanel.clearLoadingStatus();
+            safeThis->toolbar.hideProgress();
 
             if (synthesizedAudio.empty())
             {
@@ -1080,9 +1098,6 @@ void MainComponent::reinterpolateUV(int startFrame, int endFrame)
     if (audioData.waveform.getNumSamples() == 0 || audioData.f0.empty())
         return;
 
-    // Show progress
-    parameterPanel.setLoadingStatus("Analyzing UV...");
-
     // Convert frame range to sample range
     int startSample = startFrame * HOP_SIZE;
     int endSample = endFrame * HOP_SIZE;
@@ -1094,28 +1109,17 @@ void MainComponent::reinterpolateUV(int startFrame, int endFrame)
 
     int numSamples = endSample - startSample;
     if (numSamples <= 0)
-    {
-        parameterPanel.clearLoadingStatus();
         return;
-    }
 
     // Extract audio segment
     const float* samples = audioData.waveform.getReadPointer(0) + startSample;
 
-    // Run FCPE on this segment with progress
-    std::vector<float> fcpeF0 = fcpePitchDetector->extractF0WithProgress(
-        samples, numSamples, SAMPLE_RATE, 0.05f,
-        [this](double progress) {
-            juce::MessageManager::callAsync([this, progress]() {
-                parameterPanel.setLoadingProgress(progress);
-            });
-        });
+    // Run FCPE on this segment
+    std::vector<float> fcpeF0 = fcpePitchDetector->extractF0(
+        samples, numSamples, SAMPLE_RATE, 0.05f);
 
     if (fcpeF0.empty())
-    {
-        parameterPanel.clearLoadingStatus();
         return;
-    }
 
     // Calculate frame range in vocoder frame rate
     int paddingFrames = paddingSamples / HOP_SIZE;
@@ -1133,40 +1137,44 @@ void MainComponent::reinterpolateUV(int startFrame, int endFrame)
         if (dstFrame < 0 || dstFrame >= static_cast<int>(audioData.f0.size()))
             continue;
 
-        // Only update UV (unvoiced) frames - keep original voiced frames
-        if (audioData.f0[dstFrame] > 0.0f)
-            continue;
-
         double srcPos = i * ratio;
         int srcIdx = static_cast<int>(srcPos);
         double frac = srcPos - srcIdx;
 
-        float newF0 = 0.0f;
+        float fcpeValue = 0.0f;
         if (srcIdx + 1 < static_cast<int>(fcpeF0.size()))
         {
             float f0_a = fcpeF0[srcIdx];
             float f0_b = fcpeF0[srcIdx + 1];
 
             if (f0_a > 0 && f0_b > 0)
-                newF0 = static_cast<float>(f0_a * (1.0 - frac) + f0_b * frac);
+                fcpeValue = static_cast<float>(f0_a * (1.0 - frac) + f0_b * frac);
             else if (f0_a > 0)
-                newF0 = f0_a;
+                fcpeValue = f0_a;
             else if (f0_b > 0)
-                newF0 = f0_b;
+                fcpeValue = f0_b;
         }
         else if (srcIdx < static_cast<int>(fcpeF0.size()))
         {
-            newF0 = fcpeF0[srcIdx];
+            fcpeValue = fcpeF0[srcIdx];
         }
 
-        // Update F0 if we got a valid value
-        if (newF0 > 0.0f)
+        // If FCPE detects unvoiced (UV), mark as unvoiced
+        if (fcpeValue <= 0.0f)
         {
-            audioData.f0[dstFrame] = newF0;
+            audioData.f0[dstFrame] = 0.0f;
+            if (dstFrame < static_cast<int>(audioData.voicedMask.size()))
+                audioData.voicedMask[dstFrame] = false;
+        }
+        // If current frame is unvoiced but FCPE detects voiced, fill in
+        else if (audioData.f0[dstFrame] <= 0.0f)
+        {
+            audioData.f0[dstFrame] = fcpeValue;
+            if (dstFrame < static_cast<int>(audioData.voicedMask.size()))
+                audioData.voicedMask[dstFrame] = true;
         }
     }
 
-    parameterPanel.clearLoadingStatus();
     DBG("Reinterpolated UV frames " << startFrame << " to " << endFrame);
 }
 
@@ -1187,17 +1195,11 @@ void MainComponent::undo()
 {
     if (undoManager && undoManager->canUndo())
     {
-        undoManager->undo();
+        undoManager->undo();  // Action marks affected note as dirty
         pianoRoll.repaint();
-        
+
         if (project)
-        {
-            // Mark all notes as dirty for resynthesis
-            for (auto& note : project->getNotes())
-                note.markDirty();
-            
             resynthesizeIncremental();
-        }
     }
 }
 
@@ -1205,17 +1207,11 @@ void MainComponent::redo()
 {
     if (undoManager && undoManager->canRedo())
     {
-        undoManager->redo();
+        undoManager->redo();  // Action marks affected note as dirty
         pianoRoll.repaint();
-        
+
         if (project)
-        {
-            // Mark all notes as dirty for resynthesis
-            for (auto& note : project->getNotes())
-                note.markDirty();
-            
             resynthesizeIncremental();
-        }
     }
 }
 
@@ -1238,6 +1234,58 @@ void MainComponent::segmentIntoNotes(Project& targetProject)
     notes.clear();
 
     if (audioData.f0.empty()) return;
+
+    // Try to use SOME model for segmentation if available
+    if (someDetector && someDetector->isLoaded() && audioData.waveform.getNumSamples() > 0)
+    {
+        DBG("Using SOME model for note segmentation (streaming)");
+
+        const float* samples = audioData.waveform.getReadPointer(0);
+        int numSamples = audioData.waveform.getNumSamples();
+
+        // audioData.f0 uses vocoder frame rate: 44100Hz / 512 hop = 86.13 fps
+        // SOME uses 44100Hz / 512 hop = 86.13 fps (same!)
+        // So SOME frames map directly to F0 frames
+        const int f0Size = static_cast<int>(audioData.f0.size());
+
+        // Use streaming detection to show notes as they're detected
+        someDetector->detectNotesStreaming(samples, numSamples, SAMPLE_RATE,
+            [&](const std::vector<SOMEDetector::NoteEvent>& chunkNotes) {
+                for (const auto& someNote : chunkNotes)
+                {
+                    if (someNote.isRest) continue;
+
+                    // SOME frames are already in the same frame rate as F0 (hop 512 at 44100Hz)
+                    int f0Start = someNote.startFrame;
+                    int f0End = someNote.endFrame;
+
+                    f0Start = std::max(0, std::min(f0Start, f0Size - 1));
+                    f0End = std::max(f0Start + 1, std::min(f0End, f0Size));
+
+                    if (f0End - f0Start < 3) continue;
+
+                    float midi = someNote.midiNote;
+                    Note note(f0Start, f0End, midi);
+                    std::vector<float> f0Values(audioData.f0.begin() + f0Start,
+                                                audioData.f0.begin() + f0End);
+                    note.setF0Values(std::move(f0Values));
+                    notes.push_back(note);
+                }
+
+                // Update UI on main thread
+                juce::MessageManager::callAsync([this]() {
+                    pianoRoll.repaint();
+                });
+            },
+            nullptr  // progress callback
+        );
+
+        DBG("SOME segmented into " << notes.size() << " notes");
+        return;
+    }
+
+    // Fallback: segment based on model's voiced mask only
+    DBG("Using voiced mask fallback for note segmentation");
 
     // Helper to finalize a note
     auto finalizeNote = [&](int start, int end) {
@@ -1265,7 +1313,6 @@ void MainComponent::segmentIntoNotes(Project& targetProject)
         notes.push_back(note);
     };
 
-    // Segment based on model's voiced mask only - no heuristic pitch splitting
     bool inNote = false;
     int noteStart = 0;
 

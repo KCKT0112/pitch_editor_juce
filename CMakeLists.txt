@@ -9,41 +9,46 @@ option(USE_CUDA "Enable CUDA execution provider" OFF)
 option(USE_DIRECTML "Enable DirectML execution provider (Windows only)" OFF)
 set(ONNXRUNTIME_VERSION "1.17.1" CACHE STRING "ONNX Runtime version")
 
-# Detect platform and set download URL
-if(WIN32)
-    if(USE_GPU)
-        set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-win-x64-gpu-${ONNXRUNTIME_VERSION}.zip")
-    else()
-        set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-win-x64-${ONNXRUNTIME_VERSION}.zip")
-    endif()
-elseif(APPLE)
-    if(USE_GPU)
-        message(WARNING "GPU acceleration is not supported on macOS, falling back to CPU")
-    endif()
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
-        set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-osx-arm64-${ONNXRUNTIME_VERSION}.tgz")
-    else()
-        set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-osx-x86_64-${ONNXRUNTIME_VERSION}.tgz")
-    endif()
+# Check if ONNX Runtime already exists in build directory
+set(ONNXRUNTIME_CACHE_DIR "${CMAKE_BINARY_DIR}/_deps/onnxruntime-src")
+if(EXISTS "${ONNXRUNTIME_CACHE_DIR}/include/onnxruntime_cxx_api.h")
+    message(STATUS "ONNX Runtime already downloaded, skipping download")
+    set(ONNXRUNTIME_ROOT ${ONNXRUNTIME_CACHE_DIR})
 else()
-    if(USE_GPU)
-        set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}.tgz")
+    # Detect platform and set download URL
+    if(WIN32)
+        if(USE_GPU)
+            set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-win-x64-gpu-${ONNXRUNTIME_VERSION}.zip")
+        else()
+            set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-win-x64-${ONNXRUNTIME_VERSION}.zip")
+        endif()
+    elseif(APPLE)
+        if(USE_GPU)
+            message(WARNING "GPU acceleration is not supported on macOS, falling back to CPU")
+        endif()
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+            set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-osx-arm64-${ONNXRUNTIME_VERSION}.tgz")
+        else()
+            set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-osx-x86_64-${ONNXRUNTIME_VERSION}.tgz")
+        endif()
     else()
-        set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz")
+        if(USE_GPU)
+            set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-gpu-${ONNXRUNTIME_VERSION}.tgz")
+        else()
+            set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-linux-x64-${ONNXRUNTIME_VERSION}.tgz")
+        endif()
     endif()
+
+    message(STATUS "Downloading ONNX Runtime from: ${ONNXRUNTIME_URL}")
+
+    FetchContent_Declare(
+        onnxruntime
+        URL ${ONNXRUNTIME_URL}
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(onnxruntime)
+    set(ONNXRUNTIME_ROOT ${onnxruntime_SOURCE_DIR})
 endif()
-
-message(STATUS "Downloading ONNX Runtime from: ${ONNXRUNTIME_URL}")
-
-FetchContent_Declare(
-    onnxruntime
-    URL ${ONNXRUNTIME_URL}
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-FetchContent_MakeAvailable(onnxruntime)
-
-# Set ONNX Runtime paths
-set(ONNXRUNTIME_ROOT ${onnxruntime_SOURCE_DIR})
 set(ONNXRUNTIME_INCLUDE_DIR ${ONNXRUNTIME_ROOT}/include)
 if(WIN32)
     set(ONNXRUNTIME_LIBRARY ${ONNXRUNTIME_ROOT}/lib/onnxruntime.lib)
@@ -143,6 +148,8 @@ set(PITCH_EDITOR_COMMON_SOURCES
     Source/Audio/PitchDetector.h
     Source/Audio/FCPEPitchDetector.cpp
     Source/Audio/FCPEPitchDetector.h
+    Source/Audio/SOMEDetector.cpp
+    Source/Audio/SOMEDetector.h
     Source/UI/CustomTitleBar.cpp
     Source/UI/CustomTitleBar.h
     ${MAINCOMPONENT_SOURCE}
@@ -166,7 +173,9 @@ set(PITCH_EDITOR_COMMON_SOURCES
     Source/Utils/Constants.h
     Source/Utils/PlatformPaths.h
     Source/Utils/MelSpectrogram.cpp
-    Source/Utils/MelSpectrogram.h)
+    Source/Utils/MelSpectrogram.h
+    Source/Utils/BasePitchCurve.cpp
+    Source/Utils/BasePitchCurve.h)
 
 target_sources(PitchEditor PRIVATE
     ${MAIN_SOURCE}
@@ -344,6 +353,48 @@ target_compile_definitions(PitchEditorPlugin PRIVATE
     JUCE_APPLICATION_NAME_STRING="$<TARGET_PROPERTY:PitchEditorPlugin,JUCE_PRODUCT_NAME>"
     JUCE_APPLICATION_VERSION_STRING="$<TARGET_PROPERTY:PitchEditorPlugin,JUCE_VERSION>")
 
+# Download models if not present
+set(MODELS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Resources/models")
+set(MODELS_ZIP "${CMAKE_BINARY_DIR}/models.zip")
+set(REQUIRED_MODELS
+    "${MODELS_DIR}/pc_nsf_hifigan.onnx"
+    "${MODELS_DIR}/fcpe.onnx"
+    "${MODELS_DIR}/some.onnx"
+)
+
+# Check if any required model is missing
+set(MODELS_MISSING FALSE)
+foreach(MODEL ${REQUIRED_MODELS})
+    if(NOT EXISTS ${MODEL})
+        set(MODELS_MISSING TRUE)
+        message(STATUS "Missing model: ${MODEL}")
+    endif()
+endforeach()
+
+if(MODELS_MISSING)
+    message(STATUS "Downloading models from https://alihz.kilins.com/models.zip ...")
+    file(DOWNLOAD
+        "https://alihz.kilins.com/models.zip"
+        ${MODELS_ZIP}
+        SHOW_PROGRESS
+        STATUS DOWNLOAD_STATUS
+    )
+    list(GET DOWNLOAD_STATUS 0 STATUS_CODE)
+    if(STATUS_CODE EQUAL 0)
+        message(STATUS "Extracting models to ${CMAKE_CURRENT_SOURCE_DIR}/Resources/ ...")
+        execute_process(
+            COMMAND ${CMAKE_COMMAND} -E tar xzf ${MODELS_ZIP}
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Resources"
+        )
+        file(REMOVE ${MODELS_ZIP})
+        message(STATUS "Models downloaded and extracted successfully")
+    else()
+        message(WARNING "Failed to download models: ${DOWNLOAD_STATUS}")
+    endif()
+else()
+    message(STATUS "All required models found, skipping download")
+endif()
+
 # ONNX model path
 set(ONNX_MODEL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Resources/models/pc_nsf_hifigan.onnx")
 if(EXISTS ${ONNX_MODEL_PATH})
@@ -471,6 +522,37 @@ if(EXISTS ${FCPE_CENT_PATH})
             "${FCPE_CENT_PATH}"
             "$<TARGET_FILE_DIR:PitchEditorPlugin_VST3>/models/cent_table.bin")
     endif()
+endif()
+
+# SOME model
+set(SOME_MODEL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/Resources/models/some.onnx")
+if(EXISTS ${SOME_MODEL_PATH})
+    message(STATUS "Found SOME model: ${SOME_MODEL_PATH}")
+    if(APPLE)
+        add_custom_command(TARGET PitchEditor POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SOME_MODEL_PATH}"
+            "$<TARGET_BUNDLE_DIR:PitchEditor>/Contents/Resources/models/some.onnx")
+        add_custom_command(TARGET PitchEditorPlugin_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SOME_MODEL_PATH}"
+            "$<TARGET_BUNDLE_DIR:PitchEditorPlugin_VST3>/Contents/Resources/models/some.onnx")
+        add_custom_command(TARGET PitchEditorPlugin_AU POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SOME_MODEL_PATH}"
+            "$<TARGET_BUNDLE_DIR:PitchEditorPlugin_AU>/Contents/Resources/models/some.onnx")
+    else()
+        add_custom_command(TARGET PitchEditor POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SOME_MODEL_PATH}"
+            "$<TARGET_FILE_DIR:PitchEditor>/models/some.onnx")
+        add_custom_command(TARGET PitchEditorPlugin_VST3 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${SOME_MODEL_PATH}"
+            "$<TARGET_FILE_DIR:PitchEditorPlugin_VST3>/models/some.onnx")
+    endif()
+else()
+    message(WARNING "SOME model not found at ${SOME_MODEL_PATH}")
 endif()
 
 # Copy language files

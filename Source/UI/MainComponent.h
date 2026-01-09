@@ -5,6 +5,7 @@
 #include "../Audio/AudioEngine.h"
 #include "../Audio/PitchDetector.h"
 #include "../Audio/FCPEPitchDetector.h"
+#include "../Audio/SOMEDetector.h"
 #include "../Audio/Vocoder.h"
 #include "../Utils/UndoManager.h"
 #include "CustomTitleBar.h"
@@ -90,6 +91,7 @@ private:
     std::unique_ptr<AudioEngine> audioEngine;
     std::unique_ptr<PitchDetector> pitchDetector;  // Fallback YIN detector
     std::unique_ptr<FCPEPitchDetector> fcpePitchDetector;  // FCPE neural network detector
+    std::unique_ptr<SOMEDetector> someDetector;  // SOME note segmentation detector
     std::unique_ptr<Vocoder> vocoder;
     std::unique_ptr<PitchUndoManager> undoManager;
     
