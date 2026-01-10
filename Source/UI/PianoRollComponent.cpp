@@ -1761,7 +1761,8 @@ void PianoRollComponent::applyPitchDrawing(float x, float y) {
 
   // Convert screen coordinates to time and MIDI
   double time = xToTime(x);
-  float midi = yToMidi(y);
+  // Account for the centering offset used when drawing the pitch curve
+  float midi = yToMidi(y - pixelsPerSemitone * 0.5f);
 
   // Convert MIDI to frequency
   float freq = midiToFreq(midi);
