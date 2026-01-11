@@ -61,7 +61,7 @@ public:
     static void loadFromSettings()
     {
         auto settingsFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                                .getChildFile("PitchEditor")
+                                .getChildFile("HachiTune")
                                 .getChildFile("settings.xml");
 
         if (settingsFile.existsAsFile())

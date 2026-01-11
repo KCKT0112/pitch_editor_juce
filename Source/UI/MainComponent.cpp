@@ -1433,7 +1433,7 @@ void MainComponent::applySettings()
 {
     // Load settings from file
     auto settingsFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                            .getChildFile("PitchEditor")
+                            .getChildFile("HachiTune")
                             .getChildFile("settings.xml");
     
     juce::String device = "CPU";

@@ -7,18 +7,18 @@
  *
  * macOS:
  *   - Models: App.app/Contents/Resources/models/
- *   - Logs: ~/Library/Logs/PitchEditor/
- *   - Config: ~/Library/Application Support/PitchEditor/
+ *   - Logs: ~/Library/Logs/HachiTune/
+ *   - Config: ~/Library/Application Support/HachiTune/
  *
  * Windows:
  *   - Models: <exe_dir>/models/
- *   - Logs: %APPDATA%/PitchEditor/Logs/
- *   - Config: %APPDATA%/PitchEditor/
+ *   - Logs: %APPDATA%/HachiTune/Logs/
+ *   - Config: %APPDATA%/HachiTune/
  *
  * Linux:
  *   - Models: <exe_dir>/models/
- *   - Logs: ~/.config/PitchEditor/logs/
- *   - Config: ~/.config/PitchEditor/
+ *   - Logs: ~/.config/HachiTune/logs/
+ *   - Config: ~/.config/HachiTune/
  */
 namespace PlatformPaths
 {
@@ -39,17 +39,17 @@ namespace PlatformPaths
     inline juce::File getLogsDirectory()
     {
     #if JUCE_MAC
-        // macOS: ~/Library/Logs/PitchEditor/
+        // macOS: ~/Library/Logs/HachiTune/
         return juce::File::getSpecialLocation(juce::File::userHomeDirectory)
-                   .getChildFile("Library/Logs/PitchEditor");
+                   .getChildFile("Library/Logs/HachiTune");
     #elif JUCE_WINDOWS
-        // Windows: %APPDATA%/PitchEditor/Logs/
+        // Windows: %APPDATA%/HachiTune/Logs/
         return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                   .getChildFile("PitchEditor/Logs");
+                   .getChildFile("HachiTune/Logs");
     #else
-        // Linux: ~/.config/PitchEditor/logs/
+        // Linux: ~/.config/HachiTune/logs/
         return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                   .getChildFile("PitchEditor/logs");
+                   .getChildFile("HachiTune/logs");
     #endif
     }
 
@@ -57,7 +57,7 @@ namespace PlatformPaths
     {
         // All platforms use userApplicationDataDirectory
         return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                   .getChildFile("PitchEditor");
+                   .getChildFile("HachiTune");
     }
 
     inline juce::File getLogFile(const juce::String& name)

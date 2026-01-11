@@ -597,7 +597,7 @@ juce::StringArray SettingsComponent::getAvailableDevices()
 void SettingsComponent::loadSettings()
 {
     auto settingsFile = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-                            .getChildFile("PitchEditor")
+                            .getChildFile("HachiTune")
                             .getChildFile("settings.xml");
 
     const auto& langs = Localization::getInstance().getAvailableLanguages();
