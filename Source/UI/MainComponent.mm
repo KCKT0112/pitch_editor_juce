@@ -903,12 +903,9 @@ void MainComponent::exportFile()
                 if (!file.deleteFile())
                 {
                     toolbar.hideProgress();
-                    juce::AlertWindow::showMessageBoxAsync(
-                        juce::AlertWindow::WarningIcon,
-                        "Export Failed",
-                        "Could not delete existing file: " + file.getFullPathName(),
-                        "OK"
-                    );
+                    StyledMessageBox::show(this, "Export Failed",
+                        "Could not delete existing file:\n" + file.getFullPathName(),
+                        StyledMessageBox::WarningIcon);
                     return;
                 }
             }
@@ -921,12 +918,9 @@ void MainComponent::exportFile()
             if (!outputStream->openedOk())
             {
                 toolbar.hideProgress();
-                juce::AlertWindow::showMessageBoxAsync(
-                    juce::AlertWindow::WarningIcon,
-                    "Export Failed",
-                    "Could not open file for writing: " + file.getFullPathName(),
-                    "OK"
-                );
+                StyledMessageBox::show(this, "Export Failed",
+                    "Could not open file for writing:\n" + file.getFullPathName(),
+                    StyledMessageBox::WarningIcon);
                 return;
             }
 
@@ -948,12 +942,9 @@ void MainComponent::exportFile()
             if (writer == nullptr)
             {
                 toolbar.hideProgress();
-                juce::AlertWindow::showMessageBoxAsync(
-                    juce::AlertWindow::WarningIcon,
-                    "Export Failed",
-                    "Could not create audio writer for: " + file.getFullPathName(),
-                    "OK"
-                );
+                StyledMessageBox::show(this, "Export Failed",
+                    "Could not create audio writer for:\n" + file.getFullPathName(),
+                    StyledMessageBox::WarningIcon);
                 return;
             }
 
@@ -974,22 +965,16 @@ void MainComponent::exportFile()
             if (writeSuccess)
             {
                 toolbar.hideProgress();
-                juce::AlertWindow::showMessageBoxAsync(
-                    juce::AlertWindow::InfoIcon,
-                    "Export Complete",
+                StyledMessageBox::show(this, "Export Complete",
                     "Audio exported successfully to:\n" + file.getFullPathName(),
-                    "OK"
-                );
+                    StyledMessageBox::InfoIcon);
             }
             else
             {
                 toolbar.hideProgress();
-                juce::AlertWindow::showMessageBoxAsync(
-                    juce::AlertWindow::WarningIcon,
-                    "Export Failed",
-                    "Failed to write audio data to: " + file.getFullPathName(),
-                    "OK"
-                );
+                StyledMessageBox::show(this, "Export Failed",
+                    "Failed to write audio data to:\n" + file.getFullPathName(),
+                    StyledMessageBox::WarningIcon);
             }
         }
     });
