@@ -5,11 +5,17 @@
 #include "../Audio/PitchDetector.h"
 #include "../Audio/SOMEDetector.h"
 #include "../Audio/Vocoder.h"
+#include "../Audio/IO/AudioFileManager.h"
+#include "../Audio/Analysis/AudioAnalyzer.h"
+#include "../Audio/Synthesis/IncrementalSynthesizer.h"
+#include "../Audio/Engine/PlaybackController.h"
 #include "../JuceHeader.h"
 #include "../Models/Project.h"
 #include "../Utils/UndoManager.h"
 #include "CustomMenuBarLookAndFeel.h"
 #include "CustomTitleBar.h"
+#include "Main/MenuHandler.h"
+#include "Main/SettingsManager.h"
 #include "ParameterPanel.h"
 #include "PianoRollComponent.h"
 #include "SettingsComponent.h"
@@ -21,7 +27,6 @@
 class MainComponent : public juce::Component,
                       public juce::Timer,
                       public juce::KeyListener,
-                      public juce::MenuBarModel,
                       public juce::FileDragAndDropTarget {
 public:
   explicit MainComponent(bool enableAudioDevice = true);
@@ -40,12 +45,6 @@ public:
   void mouseDown(const juce::MouseEvent &e) override;
   void mouseDrag(const juce::MouseEvent &e) override;
   void mouseDoubleClick(const juce::MouseEvent &e) override;
-
-  // MenuBarModel
-  juce::StringArray getMenuBarNames() override;
-  juce::PopupMenu getMenuForIndex(int menuIndex,
-                                  const juce::String &menuName) override;
-  void menuItemSelected(int menuItemID, int topLevelMenuIndex) override;
 
   // FileDragAndDropTarget
   bool isInterestedInFileDrag(const juce::StringArray &files) override;
@@ -84,7 +83,6 @@ private:
   void seek(double time);
   void resynthesizeIncremental(); // Incremental synthesis on edit
   void showSettings();
-  void applySettings();
 
   void onNoteSelected(Note *note);
   void onPitchEdited();
@@ -101,9 +99,6 @@ private:
   void segmentIntoNotes();
   void segmentIntoNotes(Project &targetProject);
 
-  void loadConfig();
-  void saveConfig();
-
   void saveProject();
 
   void undo();
@@ -119,6 +114,14 @@ private:
       someDetector; // SOME note segmentation detector (legacy)
   std::unique_ptr<Vocoder> vocoder;
   std::unique_ptr<PitchUndoManager> undoManager;
+
+  // New modular components
+  std::unique_ptr<AudioFileManager> fileManager;
+  std::unique_ptr<AudioAnalyzer> audioAnalyzer;
+  std::unique_ptr<IncrementalSynthesizer> incrementalSynth;
+  std::unique_ptr<PlaybackController> playbackController;
+  std::unique_ptr<MenuHandler> menuHandler;
+  std::unique_ptr<SettingsManager> settingsManager;
 
   bool useFCPE = true; // Use FCPE by default if available
 

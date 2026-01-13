@@ -5,6 +5,10 @@
 #include "../Utils/Constants.h"
 #include "../Utils/UndoManager.h"
 #include "../Utils/DrawCurve.h"
+#include "PianoRoll/CoordinateMapper.h"
+#include "PianoRoll/PianoRollRenderer.h"
+#include "PianoRoll/ScrollZoomController.h"
+#include "PianoRoll/PitchEditor.h"
 
 #include <deque>
 #include <memory>
@@ -49,7 +53,7 @@ public:
     Project* getProject() const { return project; }
     
     // Undo Manager
-    void setUndoManager(PitchUndoManager* manager) { undoManager = manager; }
+    void setUndoManager(PitchUndoManager* manager);
     PitchUndoManager* getUndoManager() const { return undoManager; }
     
     // Cursor
@@ -108,7 +112,13 @@ private:
     
     Project* project = nullptr;
     PitchUndoManager* undoManager = nullptr;
-    
+
+    // New modular components
+    std::unique_ptr<CoordinateMapper> coordMapper;
+    std::unique_ptr<PianoRollRenderer> renderer;
+    std::unique_ptr<ScrollZoomController> scrollZoomController;
+    std::unique_ptr<PitchEditor> pitchEditor;
+
     float pixelsPerSecond = DEFAULT_PIXELS_PER_SECOND;
     float pixelsPerSemitone = DEFAULT_PIXELS_PER_SEMITONE;
     

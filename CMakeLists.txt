@@ -176,10 +176,12 @@ set(PITCH_EDITOR_COMMON_SOURCES
     Source/JuceHeader.h
     Source/Plugin/HostCompatibility.h
     Source/Plugin/HostCompatibility.cpp
+    # Audio - Engine
     Source/Audio/AudioEngine.cpp
     Source/Audio/AudioEngine.h
-    Source/Audio/Vocoder.cpp
-    Source/Audio/Vocoder.h
+    Source/Audio/Engine/PlaybackController.cpp
+    Source/Audio/Engine/PlaybackController.h
+    # Audio - Analysis
     Source/Audio/PitchDetector.cpp
     Source/Audio/PitchDetector.h
     Source/Audio/FCPEPitchDetector.cpp
@@ -188,12 +190,36 @@ set(PITCH_EDITOR_COMMON_SOURCES
     Source/Audio/SOMEDetector.h
     Source/Audio/RealtimePitchProcessor.cpp
     Source/Audio/RealtimePitchProcessor.h
+    Source/Audio/Analysis/AudioAnalyzer.cpp
+    Source/Audio/Analysis/AudioAnalyzer.h
+    # Audio - Synthesis
+    Source/Audio/Vocoder.cpp
+    Source/Audio/Vocoder.h
+    Source/Audio/Synthesis/IncrementalSynthesizer.cpp
+    Source/Audio/Synthesis/IncrementalSynthesizer.h
+    # Audio - IO
+    Source/Audio/IO/AudioFileManager.cpp
+    Source/Audio/IO/AudioFileManager.h
+    # UI - Main
     Source/UI/CustomTitleBar.cpp
     Source/UI/CustomTitleBar.h
     ${MAINCOMPONENT_SOURCE}
     Source/UI/MainComponent.h
+    Source/UI/Main/MenuHandler.cpp
+    Source/UI/Main/MenuHandler.h
+    Source/UI/Main/SettingsManager.cpp
+    Source/UI/Main/SettingsManager.h
+    # UI - PianoRoll
     Source/UI/PianoRollComponent.cpp
     Source/UI/PianoRollComponent.h
+    Source/UI/PianoRoll/CoordinateMapper.h
+    Source/UI/PianoRoll/PianoRollRenderer.cpp
+    Source/UI/PianoRoll/PianoRollRenderer.h
+    Source/UI/PianoRoll/ScrollZoomController.cpp
+    Source/UI/PianoRoll/ScrollZoomController.h
+    Source/UI/PianoRoll/PitchEditor.cpp
+    Source/UI/PianoRoll/PitchEditor.h
+    # UI - Components
     Source/UI/WaveformComponent.cpp
     Source/UI/WaveformComponent.h
     ${TOOLBAR_SOURCE}
@@ -204,13 +230,17 @@ set(PITCH_EDITOR_COMMON_SOURCES
     Source/UI/SettingsComponent.h
     Source/UI/StyledComponents.cpp
     Source/UI/StyledComponents.h
+    # Models
     Source/Models/Project.cpp
     Source/Models/Project.h
     Source/Models/Note.cpp
     Source/Models/Note.h
+    # Utils
     Source/Utils/DrawCurve.h
     Source/Utils/Constants.h
     Source/Utils/PlatformPaths.h
+    Source/Utils/UndoManager.h
+    Source/Utils/Localization.h
     Source/Utils/MelSpectrogram.cpp
     Source/Utils/MelSpectrogram.h
     Source/Utils/BasePitchCurve.cpp

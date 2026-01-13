@@ -22,6 +22,14 @@ MainComponent::MainComponent(bool enableAudioDevice)
   vocoder = std::make_unique<Vocoder>();
   undoManager = std::make_unique<PitchUndoManager>(100);
 
+  // Initialize new modular components
+  fileManager = std::make_unique<AudioFileManager>();
+  audioAnalyzer = std::make_unique<AudioAnalyzer>();
+  incrementalSynth = std::make_unique<IncrementalSynthesizer>();
+  playbackController = std::make_unique<PlaybackController>();
+  menuHandler = std::make_unique<MenuHandler>();
+  settingsManager = std::make_unique<SettingsManager>();
+
   // Try to load FCPE model
   auto modelsDir = PlatformPaths::getModelsDirectory();
 
@@ -69,19 +77,38 @@ MainComponent::MainComponent(bool enableAudioDevice)
     DBG("SOME model not found at: " + someModelPath.getFullPathName());
   }
 
+  // Wire up modular components (after all detectors are initialized)
+  audioAnalyzer->setFCPEDetector(fcpePitchDetector.get());
+  audioAnalyzer->setYINDetector(pitchDetector.get());
+  audioAnalyzer->setSOMEDetector(someDetector.get());
+  incrementalSynth->setVocoder(vocoder.get());
+  playbackController->setAudioEngine(audioEngine.get());
+  menuHandler->setUndoManager(undoManager.get());
+  menuHandler->setPluginMode(isPluginMode());
+  settingsManager->setVocoder(vocoder.get());
+
   // Load vocoder settings
-  applySettings();
+  settingsManager->applySettings();
 
   // Initialize audio (standalone app only)
   if (audioEngine)
     audioEngine->initializeAudio();
 
+  // Setup MenuHandler callbacks
+  menuHandler->onOpenFile = [this]() { openFile(); };
+  menuHandler->onSaveProject = [this]() { saveProject(); };
+  menuHandler->onExportFile = [this]() { exportFile(); };
+  menuHandler->onUndo = [this]() { undo(); };
+  menuHandler->onRedo = [this]() { redo(); };
+  menuHandler->onShowSettings = [this]() { showSettings(); };
+  menuHandler->onQuit = [this]() { juce::JUCEApplication::getInstance()->systemRequestedQuit(); };
+
   // Add child components - macOS uses native menu, others use in-app menu bar
 #if JUCE_MAC
   if (!isPluginMode())
-    juce::MenuBarModel::setMacMainMenu(this);
+    juce::MenuBarModel::setMacMainMenu(menuHandler.get());
 #else
-  menuBar.setModel(this);
+  menuBar.setModel(menuHandler.get());
   menuBar.setLookAndFeel(&menuBarLookAndFeel);
   addAndMakeVisible(menuBar);
 #endif
@@ -166,7 +193,7 @@ MainComponent::MainComponent(bool enableAudioDevice)
 
   // Load config
   if (enableAudioDeviceFlag)
-    loadConfig();
+    settingsManager->loadConfig();
 
   // Start timer for UI updates
   startTimerHz(30);
@@ -192,7 +219,7 @@ MainComponent::~MainComponent() {
   }
 
   if (enableAudioDeviceFlag)
-    saveConfig();
+    settingsManager->saveConfig();
 }
 
 void MainComponent::paint(juce::Graphics &g) {
@@ -1575,151 +1602,12 @@ void MainComponent::showSettings() {
 
     settingsDialog = std::make_unique<SettingsDialog>(deviceMgr);
     settingsDialog->getSettingsComponent()->onSettingsChanged = [this]() {
-      applySettings();
+      settingsManager->applySettings();
     };
   }
 
   settingsDialog->setVisible(true);
   settingsDialog->toFront(true);
-}
-
-void MainComponent::applySettings() {
-  // Load settings from file
-  auto settingsFile =
-      juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-          .getChildFile("HachiTune")
-          .getChildFile("settings.xml");
-
-  juce::String device = "CPU";
-  int threads = 0;
-
-  if (settingsFile.existsAsFile()) {
-    auto xml = juce::XmlDocument::parse(settingsFile);
-    if (xml != nullptr) {
-      device = xml->getStringAttribute("device", "CPU");
-      threads = xml->getIntAttribute("threads", 0);
-    }
-  }
-
-  // Apply to vocoder
-  if (vocoder) {
-    vocoder->setExecutionDevice(device);
-
-    // Reload model if already loaded to apply new execution provider
-    if (vocoder->isLoaded())
-      vocoder->reloadModel();
-  }
-}
-
-void MainComponent::loadConfig() {
-  auto configFile = PlatformPaths::getConfigFile("config.json");
-
-  if (configFile.existsAsFile()) {
-    auto configText = configFile.loadFileAsString();
-    auto config = juce::JSON::parse(configText);
-
-    if (config.isObject()) {
-      auto configObj = config.getDynamicObject();
-      if (configObj) {
-        // Load last opened file path (for future use)
-        // juce::String lastFile =
-        // configObj->getProperty("lastFile").toString();
-
-        // Load window size (for future use)
-        // int width = configObj->getProperty("windowWidth");
-        // int height = configObj->getProperty("windowHeight");
-      }
-    }
-  }
-}
-
-void MainComponent::saveConfig() {
-  auto configFile = PlatformPaths::getConfigFile("config.json");
-
-  juce::DynamicObject::Ptr config = new juce::DynamicObject();
-
-  // Save last opened file path
-  if (project && project->getFilePath().existsAsFile()) {
-    config->setProperty("lastFile", project->getFilePath().getFullPathName());
-  }
-
-  // Save window size
-  config->setProperty("windowWidth", getWidth());
-  config->setProperty("windowHeight", getHeight());
-
-  // Write to file
-  juce::String jsonText = juce::JSON::toString(juce::var(config.get()));
-  configFile.replaceWithText(jsonText);
-}
-
-// Menu IDs
-enum MenuIDs {
-  menuOpen = 1,
-  menuExport,
-  menuUndo,
-  menuRedo,
-  menuSettings,
-  menuQuit
-};
-
-juce::StringArray MainComponent::getMenuBarNames() {
-  return {TR("menu.file"), TR("menu.edit")};
-}
-
-juce::PopupMenu
-MainComponent::getMenuForIndex(int menuIndex,
-                               const juce::String & /*menuName*/) {
-  juce::PopupMenu menu;
-
-  if (menuIndex == 0) // File menu
-  {
-    // Only show open/export in standalone mode
-    if (!isPluginMode()) {
-      menu.addItem(menuOpen, TR("menu.open"), true, false);
-      menu.addItem(menuExport, TR("menu.export"), project != nullptr, false);
-    }
-#if !JUCE_MAC
-    if (!isPluginMode())
-      menu.addSeparator();
-    menu.addItem(menuQuit, TR("menu.quit"), true, false);
-#endif
-  } else if (menuIndex == 1) // Edit menu
-  {
-    bool canUndo = undoManager && undoManager->canUndo();
-    bool canRedo = undoManager && undoManager->canRedo();
-    menu.addItem(menuUndo, TR("menu.undo"), canUndo, false);
-    menu.addItem(menuRedo, TR("menu.redo"), canRedo, false);
-    menu.addSeparator();
-    menu.addItem(menuSettings, TR("menu.settings"), true, false);
-  }
-
-  return menu;
-}
-
-void MainComponent::menuItemSelected(int menuItemID,
-                                     int /*topLevelMenuIndex*/) {
-  switch (menuItemID) {
-  case menuOpen:
-    openFile();
-    break;
-  case menuExport:
-    exportFile();
-    break;
-  case menuUndo:
-    undo();
-    break;
-  case menuRedo:
-    redo();
-    break;
-  case menuSettings:
-    showSettings();
-    break;
-  case menuQuit:
-    juce::JUCEApplication::getInstance()->systemRequestedQuit();
-    break;
-  default:
-    break;
-  }
 }
 
 bool MainComponent::isInterestedInFileDrag(const juce::StringArray &files) {

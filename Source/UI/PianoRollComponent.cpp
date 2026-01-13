@@ -6,8 +6,47 @@
 #include <limits>
 
 PianoRollComponent::PianoRollComponent() {
+  // Initialize modular components
+  coordMapper = std::make_unique<CoordinateMapper>();
+  renderer = std::make_unique<PianoRollRenderer>();
+  scrollZoomController = std::make_unique<ScrollZoomController>();
+  pitchEditor = std::make_unique<PitchEditor>();
+
+  // Wire up components
+  renderer->setCoordinateMapper(coordMapper.get());
+  scrollZoomController->setCoordinateMapper(coordMapper.get());
+  pitchEditor->setCoordinateMapper(coordMapper.get());
+
+  // Setup scrollZoomController callbacks
+  scrollZoomController->onRepaintNeeded = [this]() { repaint(); };
+  scrollZoomController->onZoomChanged = [this](float pps) {
+    if (onZoomChanged) onZoomChanged(pps);
+  };
+  scrollZoomController->onScrollChanged = [this](double x) {
+    if (onScrollChanged) onScrollChanged(x);
+  };
+
+  // Setup pitchEditor callbacks
+  pitchEditor->onNoteSelected = [this](Note* note) {
+    if (onNoteSelected) onNoteSelected(note);
+  };
+  pitchEditor->onPitchEdited = [this]() {
+    repaint();
+    if (onPitchEdited) onPitchEdited();
+  };
+  pitchEditor->onPitchEditFinished = [this]() {
+    if (onPitchEditFinished) onPitchEditFinished();
+  };
+  pitchEditor->onBasePitchCacheInvalidated = [this]() {
+    invalidateBasePitchCache();
+  };
+
   addAndMakeVisible(horizontalScrollBar);
   addAndMakeVisible(verticalScrollBar);
+
+  // Use scrollZoomController's scrollbars
+  addAndMakeVisible(scrollZoomController->getHorizontalScrollBar());
+  addAndMakeVisible(scrollZoomController->getVerticalScrollBar());
 
   horizontalScrollBar.addListener(this);
   verticalScrollBar.addListener(this);
@@ -1208,9 +1247,20 @@ void PianoRollComponent::scrollBarMoved(juce::ScrollBar *scrollBar,
 
 void PianoRollComponent::setProject(Project *proj) {
   project = proj;
+
+  // Update modular components
+  renderer->setProject(proj);
+  scrollZoomController->setProject(proj);
+  pitchEditor->setProject(proj);
+
   invalidateBasePitchCache(); // Clear cache when project changes
   updateScrollBars();
   repaint();
+}
+
+void PianoRollComponent::setUndoManager(PitchUndoManager *manager) {
+  undoManager = manager;
+  pitchEditor->setUndoManager(manager);
 }
 
 void PianoRollComponent::setCursorTime(double time) {
