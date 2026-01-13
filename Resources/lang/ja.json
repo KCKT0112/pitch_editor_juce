@@ -46,6 +46,7 @@
   "settings.sample_rate": "サンプルレート:",
   "settings.buffer_size": "バッファサイズ:",
   "settings.output_channels": "チャンネル:",
+  "settings.pitch_detector": "ピッチ検出器:",
 
   "lang.auto": "自動",
   "lang.en": "English",

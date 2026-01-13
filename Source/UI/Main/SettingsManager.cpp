@@ -1,4 +1,5 @@
 #include "SettingsManager.h"
+#include "../../Utils/AppLogger.h"
 
 SettingsManager::SettingsManager() {
     loadSettings();
@@ -23,7 +24,14 @@ void SettingsManager::loadSettings() {
         if (xml != nullptr) {
             device = xml->getStringAttribute("device", "CPU");
             threads = xml->getIntAttribute("threads", 0);
+
+            // Load pitch detector type
+            juce::String pitchDetectorStr = xml->getStringAttribute("pitchDetector", "RMVPE");
+            pitchDetectorType = stringToPitchDetectorType(pitchDetectorStr);
+            LOG("SettingsManager: Loaded pitchDetector = " + pitchDetectorStr);
         }
+    } else {
+        LOG("SettingsManager: Settings file not found, using defaults (RMVPE)");
     }
 }
 

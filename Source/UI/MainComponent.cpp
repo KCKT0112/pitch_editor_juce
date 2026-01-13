@@ -1,4 +1,5 @@
 #include "MainComponent.h"
+#include "../Utils/AppLogger.h"
 #include "../Utils/Constants.h"
 #include "../Utils/F0Smoother.h"
 #include "../Utils/Localization.h"
@@ -7,6 +8,7 @@
 #include "../Utils/PlatformPaths.h"
 #include <atomic>
 #include <iostream>
+#include <climits>
 
 MainComponent::MainComponent(bool enableAudioDevice)
     : enableAudioDeviceFlag(enableAudioDevice) {
@@ -19,6 +21,7 @@ MainComponent::MainComponent(bool enableAudioDevice)
     audioEngine = std::make_unique<AudioEngine>();
   pitchDetector = std::make_unique<PitchDetector>();
   fcpePitchDetector = std::make_unique<FCPEPitchDetector>();
+  rmvpePitchDetector = std::make_unique<RMVPEPitchDetector>();
   vocoder = std::make_unique<Vocoder>();
   undoManager = std::make_unique<PitchUndoManager>(100);
 
@@ -52,16 +55,33 @@ MainComponent::MainComponent(bool enableAudioDevice)
                                      centTablePath, GPUProvider::CPU))
 #endif
     {
-      DBG("FCPE pitch detector loaded successfully");
-      useFCPE = true;
+      LOG("FCPE pitch detector loaded successfully");
     } else {
-      DBG("Failed to load FCPE model, falling back to YIN");
-      useFCPE = false;
+      LOG("Failed to load FCPE model");
     }
   } else {
-    DBG("FCPE model not found at: " + fcpeModelPath.getFullPathName());
-    DBG("Using YIN pitch detector as fallback");
-    useFCPE = false;
+    LOG("FCPE model not found at: " + fcpeModelPath.getFullPathName());
+  }
+
+  // Try to load RMVPE model
+  auto rmvpeModelPath = modelsDir.getChildFile("rmvpe.onnx");
+  if (rmvpeModelPath.existsAsFile()) {
+#ifdef USE_DIRECTML
+    if (rmvpePitchDetector->loadModel(rmvpeModelPath, GPUProvider::DirectML))
+#elif defined(USE_CUDA)
+    if (rmvpePitchDetector->loadModel(rmvpeModelPath, GPUProvider::CUDA))
+#elif defined(__APPLE__)
+    if (rmvpePitchDetector->loadModel(rmvpeModelPath, GPUProvider::CoreML))
+#else
+    if (rmvpePitchDetector->loadModel(rmvpeModelPath, GPUProvider::CPU))
+#endif
+    {
+      LOG("RMVPE pitch detector loaded successfully");
+    } else {
+      LOG("Failed to load RMVPE model");
+    }
+  } else {
+    LOG("RMVPE model not found at: " + rmvpeModelPath.getFullPathName());
   }
 
   // Initialize legacy SOME detector
@@ -79,8 +99,13 @@ MainComponent::MainComponent(bool enableAudioDevice)
 
   // Wire up modular components (after all detectors are initialized)
   audioAnalyzer->setFCPEDetector(fcpePitchDetector.get());
+  audioAnalyzer->setRMVPEDetector(rmvpePitchDetector.get());
   audioAnalyzer->setYINDetector(pitchDetector.get());
   audioAnalyzer->setSOMEDetector(someDetector.get());
+
+  // Apply pitch detector type from settings
+  audioAnalyzer->setPitchDetectorType(settingsManager->getPitchDetectorType());
+
   incrementalSynth->setVocoder(vocoder.get());
   playbackController->setAudioEngine(audioEngine.get());
   menuHandler->setUndoManager(undoManager.get());
@@ -102,6 +127,53 @@ MainComponent::MainComponent(bool enableAudioDevice)
   menuHandler->onRedo = [this]() { redo(); };
   menuHandler->onShowSettings = [this]() { showSettings(); };
   menuHandler->onQuit = [this]() { juce::JUCEApplication::getInstance()->systemRequestedQuit(); };
+  menuHandler->onExportSOMEDebug = [this]() {
+    if (!project) return;
+
+    auto& audioData = project->getAudioData();
+    if (audioData.waveform.getNumSamples() == 0) {
+      juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+        "Export SOME Debug", "No audio loaded.");
+      return;
+    }
+
+    if (!someDetector || !someDetector->isLoaded()) {
+      juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,
+        "Export SOME Debug", "SOME detector not loaded.");
+      return;
+    }
+
+    // Run SOME inference directly
+    const float* samples = audioData.waveform.getReadPointer(0);
+    int numSamples = audioData.waveform.getNumSamples();
+
+    auto someNotes = someDetector->detectNotes(samples, numSamples, SOMEDetector::SAMPLE_RATE);
+
+    if (someNotes.empty()) {
+      juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+        "Export SOME Debug", "SOME detected no notes.");
+      return;
+    }
+
+    // Build CSV with raw SOME output
+    juce::String csv = "index,startFrame,endFrame,midiNote,isRest\n";
+    int idx = 0;
+    for (const auto& note : someNotes) {
+      csv += juce::String(idx++) + ","
+           + juce::String(note.startFrame) + ","
+           + juce::String(note.endFrame) + ","
+           + juce::String(note.midiNote, 6) + ","
+           + juce::String(note.isRest ? 1 : 0) + "\n";
+    }
+
+    // Save to file
+    auto debugFile = juce::File::getSpecialLocation(juce::File::userDesktopDirectory)
+                       .getChildFile("some_raw_output.csv");
+    debugFile.replaceWithText(csv);
+
+    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,
+      "Export SOME Debug", "SOME raw output: " + juce::String(someNotes.size()) + " notes\nSaved to:\n" + debugFile.getFullPathName());
+  };
 
   // Add child components - macOS uses native menu, others use in-app menu bar
 #if JUCE_MAC
@@ -739,85 +811,112 @@ void MainComponent::analyzeAudio(
   int targetFrames = static_cast<int>(audioData.melSpectrogram.size());
 
   onProgress(0.55, "Extracting pitch (F0)...");
-  // Use FCPE if available, otherwise fall back to YIN
-  // FCPE and YIN model inference runs in background thread
-  if (useFCPE && fcpePitchDetector && fcpePitchDetector->isLoaded()) {
-    std::vector<float> fcpeF0 =
-        fcpePitchDetector->extractF0(samples, numSamples, SAMPLE_RATE);
 
-    // Resample FCPE F0 (100 fps @ 16kHz) to vocoder frame rate (86.1 fps
-    // @ 44.1kHz) FCPE: sr=16000, hop=160 -> 100 fps, frame time = hop/16000 =
-    // 0.01s Vocoder: sr=44100, hop=512 -> 86.13 fps, frame time = hop/44100 =
-    // 0.01161s Use time-based alignment for better accuracy
-    if (!fcpeF0.empty() && targetFrames > 0) {
-      audioData.f0.resize(targetFrames);
+  // Get pitch detector type from settings
+  PitchDetectorType detectorType = settingsManager->getPitchDetectorType();
+  LOG("========== PITCH DETECTOR SELECTION ==========");
+  LOG("Selected detector: " + juce::String(pitchDetectorTypeToString(detectorType)));
+  LOG("RMVPE loaded: " + juce::String(rmvpePitchDetector && rmvpePitchDetector->isLoaded() ? "YES" : "NO"));
+  LOG("FCPE loaded: " + juce::String(fcpePitchDetector && fcpePitchDetector->isLoaded() ? "YES" : "NO"));
 
-      // Time per frame for each system
-      const double fcpeFrameTime = 160.0 / 16000.0;    // 0.01 seconds
-      const double vocoderFrameTime = 512.0 / 44100.0; // ~0.01161 seconds
+  // Extract F0 based on selected detector type
+  std::vector<float> extractedF0;
+  bool useNeuralDetector = false;
+  bool isFallback = false;
 
-      for (int i = 0; i < targetFrames; ++i) {
-        // Calculate time position for vocoder frame
-        double vocoderTime = i * vocoderFrameTime;
+  // Try selected detector first
+  if (detectorType == PitchDetectorType::RMVPE && rmvpePitchDetector && rmvpePitchDetector->isLoaded()) {
+    LOG(">>> USING RMVPE (selected)");
+    extractedF0 = rmvpePitchDetector->extractF0(samples, numSamples, SAMPLE_RATE);
+    useNeuralDetector = true;
+  } else if (detectorType == PitchDetectorType::FCPE && fcpePitchDetector && fcpePitchDetector->isLoaded()) {
+    LOG(">>> USING FCPE (selected)");
+    extractedF0 = fcpePitchDetector->extractF0(samples, numSamples, SAMPLE_RATE);
+    useNeuralDetector = true;
+  } else {
+    LOG("WARNING: Selected detector not available!");
+    if (detectorType == PitchDetectorType::RMVPE)
+      LOG("  RMVPE was selected but not loaded");
+    else if (detectorType == PitchDetectorType::FCPE)
+      LOG("  FCPE was selected but not loaded");
+  }
 
-        // Find corresponding FCPE frame indices
-        double fcpeFramePos = vocoderTime / fcpeFrameTime;
-        int srcIdx = static_cast<int>(fcpeFramePos);
-        double frac = fcpeFramePos - srcIdx;
+  // Fallback chain if selected detector not available
+  if (!useNeuralDetector) {
+    isFallback = true;
+    if (rmvpePitchDetector && rmvpePitchDetector->isLoaded()) {
+      LOG(">>> FALLBACK: Using RMVPE");
+      extractedF0 = rmvpePitchDetector->extractF0(samples, numSamples, SAMPLE_RATE);
+      useNeuralDetector = true;
+    } else if (fcpePitchDetector && fcpePitchDetector->isLoaded()) {
+      LOG(">>> FALLBACK: Using FCPE");
+      extractedF0 = fcpePitchDetector->extractF0(samples, numSamples, SAMPLE_RATE);
+      useNeuralDetector = true;
+    }
+  }
 
-        if (srcIdx + 1 < static_cast<int>(fcpeF0.size())) {
-          // Linear interpolation with voiced/unvoiced awareness
-          float f0_a = fcpeF0[srcIdx];
-          float f0_b = fcpeF0[srcIdx + 1];
+  LOG("Final: useNeuralDetector=" + juce::String(useNeuralDetector ? "YES" : "NO") +
+      ", isFallback=" + juce::String(isFallback ? "YES" : "NO"));
+  LOG("==============================================");
 
-          if (f0_a > 0.0f && f0_b > 0.0f) {
-            // Both voiced: linear interpolation in log domain for better
-            // musical accuracy
-            float logF0_a = std::log(f0_a);
-            float logF0_b = std::log(f0_b);
-            float logF0_interp = logF0_a * (1.0 - frac) + logF0_b * frac;
-            audioData.f0[i] = std::exp(logF0_interp);
-          } else if (f0_a > 0.0f) {
-            // Only first voiced: use it
-            audioData.f0[i] = f0_a;
-          } else if (f0_b > 0.0f) {
-            // Only second voiced: use it
-            audioData.f0[i] = f0_b;
-          } else {
-            // Both unvoiced
-            audioData.f0[i] = 0.0f;
-          }
-        } else if (srcIdx < static_cast<int>(fcpeF0.size())) {
-          audioData.f0[i] = fcpeF0[srcIdx];
-        } else if (srcIdx >= static_cast<int>(fcpeF0.size())) {
-          // Beyond source range: use last value if voiced
-          audioData.f0[i] = fcpeF0.back() > 0.0f ? fcpeF0.back() : 0.0f;
+  if (useNeuralDetector && !extractedF0.empty() && targetFrames > 0) {
+    // Resample neural F0 (100 fps @ 16kHz) to vocoder frame rate (86.1 fps @ 44.1kHz)
+    audioData.f0.resize(targetFrames);
+
+    // Time per frame for each system
+    const double neuralFrameTime = 160.0 / 16000.0;    // 0.01 seconds
+    const double vocoderFrameTime = 512.0 / 44100.0;   // ~0.01161 seconds
+
+    for (int i = 0; i < targetFrames; ++i) {
+      double vocoderTime = i * vocoderFrameTime;
+      double neuralFramePos = vocoderTime / neuralFrameTime;
+      int srcIdx = static_cast<int>(neuralFramePos);
+      double frac = neuralFramePos - srcIdx;
+
+      if (srcIdx + 1 < static_cast<int>(extractedF0.size())) {
+        float f0_a = extractedF0[srcIdx];
+        float f0_b = extractedF0[srcIdx + 1];
+
+        if (f0_a > 0.0f && f0_b > 0.0f) {
+          // Log-domain interpolation for musical accuracy
+          float logF0_a = std::log(f0_a);
+          float logF0_b = std::log(f0_b);
+          float logF0_interp = logF0_a * (1.0 - frac) + logF0_b * frac;
+          audioData.f0[i] = std::exp(logF0_interp);
+        } else if (f0_a > 0.0f) {
+          audioData.f0[i] = f0_a;
+        } else if (f0_b > 0.0f) {
+          audioData.f0[i] = f0_b;
         } else {
           audioData.f0[i] = 0.0f;
         }
+      } else if (srcIdx < static_cast<int>(extractedF0.size())) {
+        audioData.f0[i] = extractedF0[srcIdx];
+      } else {
+        audioData.f0[i] = extractedF0.back() > 0.0f ? extractedF0.back() : 0.0f;
       }
-    } else {
-      audioData.f0.clear();
     }
 
-    // Create voiced mask (non-zero F0 = voiced)
+    // Create voiced mask
     audioData.voicedMask.resize(audioData.f0.size());
     for (size_t i = 0; i < audioData.f0.size(); ++i) {
       audioData.voicedMask[i] = audioData.f0[i] > 0;
     }
 
-    // Apply F0 smoothing for better quality
+    // Apply F0 smoothing
     onProgress(0.65, "Smoothing pitch curve...");
     audioData.f0 = F0Smoother::smoothF0(audioData.f0, audioData.voicedMask);
     audioData.f0 = PitchCurveProcessor::interpolateWithUvMask(
         audioData.f0, audioData.voicedMask);
   } else {
+    // Fallback to YIN
+    DBG("Fallback: Using YIN pitch detector");
     auto [f0Values, voicedValues] =
         pitchDetector->extractF0(samples, numSamples);
     audioData.f0 = std::move(f0Values);
     audioData.voicedMask = std::move(voicedValues);
 
-    // Apply F0 smoothing for better quality
+    // Apply F0 smoothing
     onProgress(0.65, "Smoothing pitch curve...");
     audioData.f0 = F0Smoother::smoothF0(audioData.f0, audioData.voicedMask);
     audioData.f0 = PitchCurveProcessor::interpolateWithUvMask(
@@ -1433,26 +1532,9 @@ void MainComponent::segmentIntoNotes(Project &targetProject) {
             if (f0End - f0Start < 3)
               continue;
 
-            // Calculate average MIDI from actual audio data (not SOME
-            // prediction) Important: average the MIDI values, not the
-            // frequencies, because freqToMidi is logarithmic and average(midi)
-            // != freqToMidi(average(freq))
-            float midiSum = 0.0f;
-            int midiCount = 0;
-            for (int j = f0Start; j < f0End; ++j) {
-              if (j < static_cast<int>(audioData.voicedMask.size()) &&
-                  audioData.voicedMask[j] && audioData.f0[j] > 0) {
-                midiSum += freqToMidi(audioData.f0[j]);
-                midiCount++;
-              }
-            }
-
-            float midi = someNote.midiNote; // Fallback to SOME prediction
-            if (midiCount > 0) {
-              midi = midiSum / midiCount; // Average of MIDI values
-            }
-
-            Note note(f0Start, f0End, midi);
+            // Use SOME's predicted MIDI value directly for note position
+            // Delta pitch (from RMVPE/FCPE F0) will capture the pitch curve details
+            Note note(f0Start, f0End, someNote.midiNote);
             std::vector<float> f0Values(audioData.f0.begin() + f0Start,
                                         audioData.f0.begin() + f0End);
             note.setF0Values(std::move(f0Values));
@@ -1473,15 +1555,6 @@ void MainComponent::segmentIntoNotes(Project &targetProject) {
     juce::Thread::sleep(100);
 
     DBG("SOME segmented into " << notes.size() << " notes");
-    juce::Logger::writeToLog("SOME segmented into " +
-                             juce::String(notes.size()) + " notes");
-
-    // Write to a debug file on desktop for visibility
-    auto logFile =
-        juce::File::getSpecialLocation(juce::File::userDesktopDirectory)
-            .getChildFile("pitch_editor_some_debug.txt");
-    logFile.appendText("SOME segmented into " + juce::String(notes.size()) +
-                       " notes\n");
 
     if (!audioData.f0.empty())
       PitchCurveProcessor::rebuildCurvesFromSource(targetProject, audioData.f0);
@@ -1603,6 +1676,9 @@ void MainComponent::showSettings() {
     settingsDialog = std::make_unique<SettingsDialog>(deviceMgr);
     settingsDialog->getSettingsComponent()->onSettingsChanged = [this]() {
       settingsManager->applySettings();
+    };
+    settingsDialog->getSettingsComponent()->onPitchDetectorChanged = [this](PitchDetectorType type) {
+      audioAnalyzer->setPitchDetectorType(type);
     };
   }
 

@@ -403,10 +403,13 @@ std::vector<SOMEDetector::NoteEvent> SOMEDetector::detectNotesWithProgress(
             NoteEvent event;
             event.startFrame = start_frame_temp;
             event.endFrame = start_frame_temp + noteDurationFrames;
-            event.midiNote = static_cast<float>(std::round(noteMidi[i]));
+            event.midiNote = noteMidi[i];
             event.isRest = false;
             allNotes.push_back(event);
             notesCreated++;
+
+            // Log SOME output for debugging
+            DBG("SOME note: midi=" << noteMidi[i] << " (raw float from model)");
             
             // Advance position for next note (or rest)
             start_frame_temp += noteDurationFrames;
@@ -438,17 +441,10 @@ void SOMEDetector::detectNotesStreaming(
 {
 #ifdef HAVE_ONNXRUNTIME
     DBG("=== detectNotesStreaming CALLED: " << numSamples << " samples ===");
-    juce::Logger::writeToLog("=== detectNotesStreaming CALLED: " + juce::String(numSamples) + " samples ===");
-    
-    // Write to desktop debug file
-    auto logFile = juce::File::getSpecialLocation(juce::File::userDesktopDirectory).getChildFile("pitch_editor_some_debug.txt");
-    logFile.appendText("=== detectNotesStreaming CALLED: " + juce::String(numSamples) + " samples ===\n");
-    
+
     if (!loaded || !onnxSession)
     {
         DBG("SOME model not loaded");
-        juce::Logger::writeToLog("SOME model not loaded");
-        logFile.appendText("SOME model not loaded\n");
         return;
     }
 
@@ -461,7 +457,6 @@ void SOMEDetector::detectNotesStreaming(
 
     MarkerList chunks = sliceAudio(waveform);
     DBG("SOME streaming: sliced into " << chunks.size() << " chunks");
-    juce::Logger::writeToLog("SOME streaming: sliced into " + juce::String(chunks.size()) + " chunks");
 
     if (chunks.empty())
         return;
@@ -498,11 +493,6 @@ void SOMEDetector::detectNotesStreaming(
         // Debug: log SOME output for diagnosis
         int restCount = static_cast<int>(std::count(noteRest.begin(), noteRest.end(), true));
         DBG("SOME streaming chunk: " << noteMidi.size() << " notes, rest count: " << restCount);
-        juce::Logger::writeToLog("SOME streaming chunk: " + juce::String(noteMidi.size()) + " notes, " + juce::String(restCount) + " rest notes");
-        
-        // Write to desktop debug file
-        auto logFile = juce::File::getSpecialLocation(juce::File::userDesktopDirectory).getChildFile("pitch_editor_some_debug.txt");
-        logFile.appendText("SOME streaming chunk: " + juce::String(noteMidi.size()) + " notes, " + juce::String(restCount) + " rest notes\n");
 
         int chunkStartFrame = static_cast<int>(beginFrame / HOP_SIZE);
         chunkStartFrame = std::max(chunkStartFrame, lastEndFrame);
@@ -568,25 +558,19 @@ void SOMEDetector::detectNotesStreaming(
             NoteEvent event;
             event.startFrame = start_frame_temp;
             event.endFrame = start_frame_temp + noteDurationFrames;
-            event.midiNote = static_cast<float>(std::round(noteMidi[i]));
+            event.midiNote = noteMidi[i];
             event.isRest = false;
             chunkNotes.push_back(event);
             notesCreated++;
+
+            // Log SOME output for debugging
+            DBG("SOME streaming note: midi=" << noteMidi[i] << " (raw float from model)");
             
             // Advance position for next note (or rest)
             start_frame_temp += noteDurationFrames;
         }
         
         DBG("SOME streaming chunk built: " << notesCreated << " notes created, " << restSkipped << " rest skipped");
-        juce::Logger::writeToLog("SOME streaming chunk built: " + juce::String(notesCreated) + " notes, " 
-            + juce::String(restSkipped) + " rest, start=" + juce::String(chunkStartFrame) 
-            + ", end=" + juce::String(start_frame_temp));
-        
-        // Write to desktop debug file
-        auto logFile2 = juce::File::getSpecialLocation(juce::File::userDesktopDirectory).getChildFile("pitch_editor_some_debug.txt");
-        logFile2.appendText("SOME streaming chunk built: " + juce::String(notesCreated) + " notes, " 
-            + juce::String(restSkipped) + " rest, start=" + juce::String(chunkStartFrame) 
-            + ", end=" + juce::String(start_frame_temp) + "\n");
 
         lastEndFrame = start_frame_temp;
 

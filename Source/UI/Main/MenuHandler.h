@@ -29,6 +29,7 @@ public:
     std::function<void()> onRedo;
     std::function<void()> onShowSettings;
     std::function<void()> onQuit;
+    std::function<void()> onExportSOMEDebug;
 
 private:
     enum MenuIDs {
@@ -38,7 +39,8 @@ private:
         MenuQuit,
         MenuUndo,
         MenuRedo,
-        MenuSettings
+        MenuSettings,
+        MenuExportSOMEDebug
     };
 
     bool pluginMode = false;

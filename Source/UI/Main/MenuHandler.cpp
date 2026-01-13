@@ -29,6 +29,8 @@ juce::PopupMenu MenuHandler::getMenuForIndex(int menuIndex, const juce::String& 
             menu.addItem(MenuSave, TRANS("Save Project"));
             menu.addItem(MenuExport, TRANS("Export..."));
             menu.addSeparator();
+            menu.addItem(MenuExportSOMEDebug, TRANS("Export SOME Debug Data..."));
+            menu.addSeparator();
             menu.addItem(MenuQuit, TRANS("Quit"));
         } else if (menuIndex == 1) {
             // Edit menu
@@ -67,6 +69,9 @@ void MenuHandler::menuItemSelected(int menuItemID, int /*topLevelMenuIndex*/) {
             break;
         case MenuSettings:
             if (onShowSettings) onShowSettings();
+            break;
+        case MenuExportSOMEDebug:
+            if (onExportSOMEDebug) onExportSOMEDebug();
             break;
         default:
             break;

@@ -8,6 +8,8 @@
 #include "../../Utils/PitchCurveProcessor.h"
 #include "../PitchDetector.h"
 #include "../FCPEPitchDetector.h"
+#include "../RMVPEPitchDetector.h"
+#include "../PitchDetectorType.h"
 #include "../SOMEDetector.h"
 #include <functional>
 #include <memory>
@@ -37,6 +39,13 @@ public:
     void setUseFCPE(bool use) { useFCPE = use; }
     bool getUseFCPE() const { return useFCPE; }
 
+    // Check if RMVPE is available
+    bool isRMVPEAvailable() const;
+
+    // Set pitch detector type
+    void setPitchDetectorType(PitchDetectorType type) { detectorType = type; }
+    PitchDetectorType getPitchDetectorType() const { return detectorType; }
+
     // Main analysis function - runs synchronously (call from background thread)
     void analyze(Project& project, ProgressCallback onProgress, CompleteCallback onComplete = nullptr);
 
@@ -53,14 +62,19 @@ public:
     // Access to detectors for configuration
     PitchDetector* getPitchDetector() { return pitchDetector ? pitchDetector.get() : externalPitchDetector; }
     FCPEPitchDetector* getFCPEDetector() { return fcpeDetector ? fcpeDetector.get() : externalFCPEDetector; }
+    RMVPEPitchDetector* getRMVPEDetector() { return rmvpeDetector ? rmvpeDetector.get() : externalRMVPEDetector; }
     SOMEDetector* getSOMEDetector() { return someDetector ? someDetector.get() : externalSOMEDetector; }
 
     // Set external detectors (optional - if not set, internal ones are used)
     void setFCPEDetector(FCPEPitchDetector* detector) { externalFCPEDetector = detector; }
+    void setRMVPEDetector(RMVPEPitchDetector* detector) { externalRMVPEDetector = detector; }
     void setYINDetector(PitchDetector* detector) { externalPitchDetector = detector; }
     void setSOMEDetector(SOMEDetector* detector) { externalSOMEDetector = detector; }
 
 private:
+    // Extract F0 using RMVPE
+    void extractF0WithRMVPE(AudioData& audioData, int targetFrames);
+
     // Extract F0 using FCPE
     void extractF0WithFCPE(AudioData& audioData, int targetFrames);
 
@@ -75,14 +89,17 @@ private:
 
     std::unique_ptr<PitchDetector> pitchDetector;
     std::unique_ptr<FCPEPitchDetector> fcpeDetector;
+    std::unique_ptr<RMVPEPitchDetector> rmvpeDetector;
     std::unique_ptr<SOMEDetector> someDetector;
 
     // External detectors (optional, not owned)
     PitchDetector* externalPitchDetector = nullptr;
     FCPEPitchDetector* externalFCPEDetector = nullptr;
+    RMVPEPitchDetector* externalRMVPEDetector = nullptr;
     SOMEDetector* externalSOMEDetector = nullptr;
 
     bool useFCPE = true;
+    PitchDetectorType detectorType = PitchDetectorType::RMVPE;
     std::atomic<bool> cancelFlag{false};
     std::atomic<bool> isRunning{false};
     std::thread analysisThread;

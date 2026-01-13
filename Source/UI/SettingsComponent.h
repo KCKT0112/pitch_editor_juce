@@ -2,6 +2,7 @@
 
 #include "../JuceHeader.h"
 #include "../Utils/Constants.h"
+#include "../Audio/PitchDetectorType.h"
 #include "StyledComponents.h"
 #include <functional>
 
@@ -27,6 +28,7 @@ public:
     // Get current settings
     juce::String getSelectedDevice() const { return currentDevice; }
     int getGPUDeviceId() const { return gpuDeviceId; }
+    PitchDetectorType getPitchDetectorType() const { return pitchDetectorType; }
 
     // Plugin mode (disables audio device settings)
     bool isPluginMode() const { return pluginMode; }
@@ -34,6 +36,7 @@ public:
     // Callbacks
     std::function<void()> onSettingsChanged;
     std::function<void()> onLanguageChanged;
+    std::function<void(PitchDetectorType)> onPitchDetectorChanged;
 
     // Load/save settings
     void loadSettings();
@@ -64,6 +67,9 @@ private:
     juce::Label gpuDeviceLabel;
     StyledComboBox gpuDeviceComboBox;
 
+    juce::Label pitchDetectorLabel;
+    StyledComboBox pitchDetectorComboBox;
+
     juce::Label infoLabel;
 
     // Audio device settings (standalone mode only)
@@ -81,6 +87,7 @@ private:
 
     juce::String currentDevice = "CPU";
     int gpuDeviceId = 0;
+    PitchDetectorType pitchDetectorType = PitchDetectorType::RMVPE;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(SettingsComponent)
 };

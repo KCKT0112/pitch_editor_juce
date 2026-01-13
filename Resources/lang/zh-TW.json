@@ -46,6 +46,7 @@
   "settings.sample_rate": "取樣率:",
   "settings.buffer_size": "緩衝區大小:",
   "settings.output_channels": "聲道:",
+  "settings.pitch_detector": "音高偵測器:",
 
   "lang.auto": "自動",
   "lang.en": "English",

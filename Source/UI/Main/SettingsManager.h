@@ -2,6 +2,7 @@
 
 #include "../../JuceHeader.h"
 #include "../../Audio/Vocoder.h"
+#include "../../Audio/PitchDetectorType.h"
 #include "../../Utils/PlatformPaths.h"
 #include <functional>
 
@@ -20,6 +21,7 @@ public:
     void applySettings();
     juce::String getDevice() const { return device; }
     int getThreads() const { return threads; }
+    PitchDetectorType getPitchDetectorType() const { return pitchDetectorType; }
 
     // Config (config.json - window state, last file)
     void loadConfig();
@@ -42,6 +44,7 @@ private:
     // Settings
     juce::String device = "CPU";
     int threads = 0;
+    PitchDetectorType pitchDetectorType = PitchDetectorType::RMVPE;
 
     // Config
     juce::File lastFilePath;

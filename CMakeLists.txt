@@ -184,8 +184,11 @@ set(PITCH_EDITOR_COMMON_SOURCES
     # Audio - Analysis
     Source/Audio/PitchDetector.cpp
     Source/Audio/PitchDetector.h
+    Source/Audio/PitchDetectorType.h
     Source/Audio/FCPEPitchDetector.cpp
     Source/Audio/FCPEPitchDetector.h
+    Source/Audio/RMVPEPitchDetector.cpp
+    Source/Audio/RMVPEPitchDetector.h
     Source/Audio/SOMEDetector.cpp
     Source/Audio/SOMEDetector.h
     Source/Audio/RealtimePitchProcessor.cpp
@@ -238,6 +241,7 @@ set(PITCH_EDITOR_COMMON_SOURCES
     # Utils
     Source/Utils/DrawCurve.h
     Source/Utils/Constants.h
+    Source/Utils/AppLogger.h
     Source/Utils/PlatformPaths.h
     Source/Utils/UndoManager.h
     Source/Utils/Localization.h

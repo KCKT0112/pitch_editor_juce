@@ -46,6 +46,7 @@
   "settings.sample_rate": "Sample Rate:",
   "settings.buffer_size": "Buffer Size:",
   "settings.output_channels": "Channels:",
+  "settings.pitch_detector": "Pitch Detector:",
 
   "lang.auto": "Auto",
   "lang.en": "English",

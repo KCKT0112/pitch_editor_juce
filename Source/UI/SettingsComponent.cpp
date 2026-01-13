@@ -60,6 +60,17 @@ SettingsComponent::SettingsComponent(juce::AudioDeviceManager* audioDeviceManage
     gpuDeviceLabel.setVisible(false);
     gpuDeviceComboBox.setVisible(false);
 
+    // Pitch detector selection
+    pitchDetectorLabel.setText(TR("settings.pitch_detector"), juce::dontSendNotification);
+    pitchDetectorLabel.setColour(juce::Label::textColourId, juce::Colours::white);
+    addAndMakeVisible(pitchDetectorLabel);
+
+    pitchDetectorComboBox.addItem("RMVPE", 1);
+    pitchDetectorComboBox.addItem("FCPE", 2);
+    pitchDetectorComboBox.setSelectedId(1, juce::dontSendNotification);  // Default to RMVPE
+    pitchDetectorComboBox.addListener(this);
+    addAndMakeVisible(pitchDetectorComboBox);
+
     // Info label
     infoLabel.setColour(juce::Label::textColourId, juce::Colour(0xFF888888));
     infoLabel.setFont(juce::Font(12.0f));
@@ -119,9 +130,9 @@ SettingsComponent::SettingsComponent(juce::AudioDeviceManager* audioDeviceManage
 
     // Set size based on mode
     if (pluginMode)
-        setSize(400, 220);
+        setSize(400, 260);
     else
-        setSize(400, 520);
+        setSize(400, 560);
 }
 
 SettingsComponent::~SettingsComponent()
@@ -160,6 +171,12 @@ void SettingsComponent::resized()
         gpuDeviceComboBox.setBounds(gpuRow.reduced(0, 2));
         bounds.removeFromTop(10);
     }
+
+    // Pitch detector row
+    auto pitchDetectorRow = bounds.removeFromTop(30);
+    pitchDetectorLabel.setBounds(pitchDetectorRow.removeFromLeft(120));
+    pitchDetectorComboBox.setBounds(pitchDetectorRow.reduced(0, 2));
+    bounds.removeFromTop(10);
 
     bounds.removeFromTop(5);
 
@@ -279,6 +296,19 @@ void SettingsComponent::comboBoxChanged(juce::ComboBox* comboBox)
         saveSettings();
         if (onSettingsChanged)
             onSettingsChanged();
+    }
+    else if (comboBox == &pitchDetectorComboBox)
+    {
+        int selectedId = pitchDetectorComboBox.getSelectedId();
+        if (selectedId == 1)
+            pitchDetectorType = PitchDetectorType::RMVPE;
+        else if (selectedId == 2)
+            pitchDetectorType = PitchDetectorType::FCPE;
+
+        saveSettings();
+
+        if (onPitchDetectorChanged)
+            onPitchDetectorChanged(pitchDetectorType);
     }
     else if (comboBox == &audioDeviceTypeComboBox)
     {
@@ -610,6 +640,10 @@ void SettingsComponent::loadSettings()
             currentDevice = xml->getStringAttribute("device", "CPU");
             gpuDeviceId = xml->getIntAttribute("gpuDeviceId", 0);
 
+            // Load pitch detector type
+            juce::String pitchDetectorStr = xml->getStringAttribute("pitchDetector", "RMVPE");
+            pitchDetectorType = stringToPitchDetectorType(pitchDetectorStr);
+
             // Load language
             juce::String langCode = xml->getStringAttribute("language", "auto");
             if (langCode == "auto")
@@ -661,6 +695,12 @@ void SettingsComponent::loadSettings()
     gpuDeviceComboBox.setSelectedId(gpuDeviceId + 1, juce::dontSendNotification);
     gpuDeviceLabel.setVisible(showGpuDeviceList);
     gpuDeviceComboBox.setVisible(showGpuDeviceList);
+
+    // Update pitch detector combo box
+    if (pitchDetectorType == PitchDetectorType::RMVPE)
+        pitchDetectorComboBox.setSelectedId(1, juce::dontSendNotification);
+    else if (pitchDetectorType == PitchDetectorType::FCPE)
+        pitchDetectorComboBox.setSelectedId(2, juce::dontSendNotification);
 }
 
 void SettingsComponent::saveSettings()
@@ -678,6 +718,7 @@ void SettingsComponent::saveSettings()
     juce::XmlElement xml("HachiTuneSettings");
     xml.setAttribute("device", currentDevice);
     xml.setAttribute("gpuDeviceId", gpuDeviceId);
+    xml.setAttribute("pitchDetector", pitchDetectorTypeToString(pitchDetectorType));
 
     // Save language code
     int langId = languageComboBox.getSelectedId();
@@ -844,9 +885,9 @@ SettingsDialog::SettingsDialog(juce::AudioDeviceManager* audioDeviceManager)
     setResizable(false, false);
 
     if (audioDeviceManager != nullptr)
-        centreWithSize(400, 520);
+        centreWithSize(400, 560);
     else
-        centreWithSize(400, 220);
+        centreWithSize(400, 260);
 }
 
 void SettingsDialog::closeButtonPressed()

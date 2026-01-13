@@ -2,6 +2,7 @@
 
 #include "../Audio/AudioEngine.h"
 #include "../Audio/FCPEPitchDetector.h"
+#include "../Audio/RMVPEPitchDetector.h"
 #include "../Audio/PitchDetector.h"
 #include "../Audio/SOMEDetector.h"
 #include "../Audio/Vocoder.h"
@@ -110,6 +111,8 @@ private:
   std::unique_ptr<PitchDetector> pitchDetector; // Fallback YIN detector
   std::unique_ptr<FCPEPitchDetector>
       fcpePitchDetector; // FCPE neural network detector (legacy)
+  std::unique_ptr<RMVPEPitchDetector>
+      rmvpePitchDetector; // RMVPE neural network detector
   std::unique_ptr<SOMEDetector>
       someDetector; // SOME note segmentation detector (legacy)
   std::unique_ptr<Vocoder> vocoder;
@@ -122,8 +125,6 @@ private:
   std::unique_ptr<PlaybackController> playbackController;
   std::unique_ptr<MenuHandler> menuHandler;
   std::unique_ptr<SettingsManager> settingsManager;
-
-  bool useFCPE = true; // Use FCPE by default if available
 
   const bool enableAudioDeviceFlag;
 

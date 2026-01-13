@@ -13,29 +13,54 @@ void AudioAnalyzer::initialize() {
     // Initialize pitch detectors
     pitchDetector = std::make_unique<PitchDetector>(SAMPLE_RATE, HOP_SIZE);
 
+    // Try to load RMVPE model (default)
+    auto rmvpeModelPath = PlatformPaths::getModelsDirectory().getChildFile("rmvpe.onnx");
+    if (rmvpeModelPath.existsAsFile()) {
+        rmvpeDetector = std::make_unique<RMVPEPitchDetector>();
+        if (rmvpeDetector->loadModel(rmvpeModelPath)) {
+            DBG("AudioAnalyzer: RMVPE model loaded");
+        } else {
+            rmvpeDetector.reset();
+            DBG("AudioAnalyzer: Failed to load RMVPE model");
+        }
+    } else {
+        DBG("AudioAnalyzer: RMVPE model not found at " << rmvpeModelPath.getFullPathName());
+    }
+
     // Try to load FCPE model
     auto fcpeModelPath = PlatformPaths::getModelsDirectory().getChildFile("fcpe.onnx");
     if (fcpeModelPath.existsAsFile()) {
         fcpeDetector = std::make_unique<FCPEPitchDetector>();
-        if (!fcpeDetector->loadModel(fcpeModelPath)) {
+        if (fcpeDetector->loadModel(fcpeModelPath)) {
+            DBG("AudioAnalyzer: FCPE model loaded");
+        } else {
             fcpeDetector.reset();
-            DBG("Failed to load FCPE model");
+            DBG("AudioAnalyzer: Failed to load FCPE model");
         }
+    } else {
+        DBG("AudioAnalyzer: FCPE model not found");
     }
 
     // Try to load SOME model
     auto someModelPath = PlatformPaths::getModelsDirectory().getChildFile("some.onnx");
     if (someModelPath.existsAsFile()) {
         someDetector = std::make_unique<SOMEDetector>();
-        if (!someDetector->loadModel(someModelPath)) {
+        if (someDetector->loadModel(someModelPath)) {
+            DBG("AudioAnalyzer: SOME model loaded");
+        } else {
             someDetector.reset();
-            DBG("Failed to load SOME model");
+            DBG("AudioAnalyzer: Failed to load SOME model");
         }
     }
 }
 
 bool AudioAnalyzer::isFCPEAvailable() const {
     auto* detector = fcpeDetector ? fcpeDetector.get() : externalFCPEDetector;
+    return detector && detector->isLoaded();
+}
+
+bool AudioAnalyzer::isRMVPEAvailable() const {
+    auto* detector = rmvpeDetector ? rmvpeDetector.get() : externalRMVPEDetector;
     return detector && detector->isLoaded();
 }
 
@@ -56,12 +81,34 @@ void AudioAnalyzer::analyze(Project& project, ProgressCallback onProgress, Compl
 
     if (cancelFlag.load()) return;
 
-    // Extract F0
+    // Extract F0 based on selected detector type
     if (onProgress) onProgress(0.55, "Extracting pitch (F0)...");
-    if (useFCPE && isFCPEAvailable()) {
+
+    bool extracted = false;
+
+    // Try selected detector first
+    if (detectorType == PitchDetectorType::RMVPE && isRMVPEAvailable()) {
+        DBG("Using RMVPE pitch detector");
+        extractF0WithRMVPE(audioData, targetFrames);
+        extracted = true;
+    } else if (detectorType == PitchDetectorType::FCPE && isFCPEAvailable()) {
+        DBG("Using FCPE pitch detector");
         extractF0WithFCPE(audioData, targetFrames);
-    } else {
-        extractF0WithYIN(audioData);
+        extracted = true;
+    }
+
+    // Fallback chain: RMVPE -> FCPE -> YIN
+    if (!extracted) {
+        if (isRMVPEAvailable()) {
+            DBG("Fallback: Using RMVPE pitch detector");
+            extractF0WithRMVPE(audioData, targetFrames);
+        } else if (isFCPEAvailable()) {
+            DBG("Fallback: Using FCPE pitch detector");
+            extractF0WithFCPE(audioData, targetFrames);
+        } else {
+            DBG("Fallback: Using YIN pitch detector");
+            extractF0WithYIN(audioData);
+        }
     }
 
     if (cancelFlag.load()) return;
@@ -100,6 +147,60 @@ void AudioAnalyzer::analyzeAsync(Project& project, ProgressCallback onProgress, 
         });
         isRunning = false;
     });
+}
+
+void AudioAnalyzer::extractF0WithRMVPE(AudioData& audioData, int targetFrames) {
+    const float* samples = audioData.waveform.getReadPointer(0);
+    int numSamples = audioData.waveform.getNumSamples();
+
+    auto* detector = rmvpeDetector ? rmvpeDetector.get() : externalRMVPEDetector;
+    std::vector<float> rmvpeF0 = detector->extractF0(samples, numSamples, SAMPLE_RATE);
+
+    if (!rmvpeF0.empty() && targetFrames > 0) {
+        audioData.f0.resize(targetFrames);
+
+        // Time per frame for each system
+        const double rmvpeFrameTime = 160.0 / 16000.0;    // 0.01 seconds
+        const double vocoderFrameTime = 512.0 / 44100.0;  // ~0.01161 seconds
+
+        for (int i = 0; i < targetFrames; ++i) {
+            double vocoderTime = i * vocoderFrameTime;
+            double rmvpeFramePos = vocoderTime / rmvpeFrameTime;
+            int srcIdx = static_cast<int>(rmvpeFramePos);
+            double frac = rmvpeFramePos - srcIdx;
+
+            if (srcIdx + 1 < static_cast<int>(rmvpeF0.size())) {
+                float f0_a = rmvpeF0[srcIdx];
+                float f0_b = rmvpeF0[srcIdx + 1];
+
+                if (f0_a > 0.0f && f0_b > 0.0f) {
+                    // Log-domain interpolation for musical accuracy
+                    float logF0_a = std::log(f0_a);
+                    float logF0_b = std::log(f0_b);
+                    float logF0_interp = logF0_a * (1.0 - frac) + logF0_b * frac;
+                    audioData.f0[i] = std::exp(logF0_interp);
+                } else if (f0_a > 0.0f) {
+                    audioData.f0[i] = f0_a;
+                } else if (f0_b > 0.0f) {
+                    audioData.f0[i] = f0_b;
+                } else {
+                    audioData.f0[i] = 0.0f;
+                }
+            } else if (srcIdx < static_cast<int>(rmvpeF0.size())) {
+                audioData.f0[i] = rmvpeF0[srcIdx];
+            } else {
+                audioData.f0[i] = rmvpeF0.back() > 0.0f ? rmvpeF0.back() : 0.0f;
+            }
+        }
+    } else {
+        audioData.f0.clear();
+    }
+
+    // Create voiced mask
+    audioData.voicedMask.resize(audioData.f0.size());
+    for (size_t i = 0; i < audioData.f0.size(); ++i) {
+        audioData.voicedMask[i] = audioData.f0[i] > 0;
+    }
 }
 
 void AudioAnalyzer::extractF0WithFCPE(AudioData& audioData, int targetFrames) {
