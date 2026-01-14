@@ -153,11 +153,11 @@ jobs:
           retention-days: 30
 
   # ===========================================
-  # macOS Universal Build (Intel + Apple Silicon)
+  # macOS ARM64 Build (Apple Silicon)
   # ===========================================
-  build-macos:
+  build-macos-arm64:
     runs-on: macos-14
-    name: macOS (Universal)
+    name: macOS (ARM64)
 
     steps:
       - name: Checkout
@@ -178,8 +178,8 @@ jobs:
         run: |
           cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
-            -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64"
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 \
+            -DCMAKE_OSX_ARCHITECTURES=arm64
 
       - name: Build
         run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
@@ -207,10 +207,175 @@ jobs:
           codesign --force --deep -s - package/HachiTune.vst3 || true
           codesign --force --deep -s - package/HachiTune.component || true
 
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HachiTune-macOS-ARM64
+          path: package/
+          retention-days: 30
+
+  # ===========================================
+  # macOS x86_64 Build (Intel)
+  # ===========================================
+  build-macos-x64:
+    runs-on: macos-13
+    name: macOS (Intel)
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Dependencies
+        run: brew install ninja
+
+      - name: Download Models
+        run: |
+          mkdir -p Resources/models
+          curl -L -o Resources/models/rmvpe.onnx "https://github.com/mdkrain/HachiTune/releases/download/Resources%2Fmodels/rmvpe.onnx"
+          curl -L -o Resources/models/some.onnx "https://github.com/mdkrain/HachiTune/releases/download/Resources%2Fmodels/some.onnx"
+
+      - name: Configure CMake
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.15 \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64
+
+      - name: Build
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Prepare Package
+        run: |
+          mkdir -p package
+          
+          # Copy standalone app
+          cp -R "build/PitchEditor_artefacts/${{ env.BUILD_TYPE }}/HachiTune.app" package/
+          
+          # Copy VST3 plugin
+          if [ -d "build/PitchEditorPlugin_artefacts/${{ env.BUILD_TYPE }}/VST3" ]; then
+            cp -R "build/PitchEditorPlugin_artefacts/${{ env.BUILD_TYPE }}/VST3/HachiTune.vst3" package/
+          fi
+          
+          # Copy AU plugin
+          if [ -d "build/PitchEditorPlugin_artefacts/${{ env.BUILD_TYPE }}/AU" ]; then
+            cp -R "build/PitchEditorPlugin_artefacts/${{ env.BUILD_TYPE }}/AU/HachiTune.component" package/
+          fi
+
+      - name: Ad-hoc Code Sign
+        run: |
+          codesign --force --deep -s - package/HachiTune.app || true
+          codesign --force --deep -s - package/HachiTune.vst3 || true
+          codesign --force --deep -s - package/HachiTune.component || true
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HachiTune-macOS-x64
+          path: package/
+          retention-days: 30
+
+  # ===========================================
+  # macOS Universal Build (Merge ARM64 + x64)
+  # ===========================================
+  build-macos-universal:
+    runs-on: macos-14
+    name: macOS (Universal)
+    needs: [build-macos-arm64, build-macos-x64]
+
+    steps:
+      - name: Download ARM64 Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: HachiTune-macOS-ARM64
+          path: arm64/
+
+      - name: Download x64 Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: HachiTune-macOS-x64
+          path: x64/
+
+      - name: Create Universal Binaries
+        run: |
+          mkdir -p universal
+          
+          # Merge standalone app
+          cp -R arm64/HachiTune.app universal/
+          lipo -create \
+            arm64/HachiTune.app/Contents/MacOS/HachiTune \
+            x64/HachiTune.app/Contents/MacOS/HachiTune \
+            -output universal/HachiTune.app/Contents/MacOS/HachiTune
+          
+          # Merge ONNX Runtime dylib in app
+          if [ -f "arm64/HachiTune.app/Contents/Frameworks/libonnxruntime.dylib" ]; then
+            lipo -create \
+              arm64/HachiTune.app/Contents/Frameworks/libonnxruntime*.dylib \
+              x64/HachiTune.app/Contents/Frameworks/libonnxruntime*.dylib \
+              -output universal/HachiTune.app/Contents/Frameworks/libonnxruntime.dylib 2>/dev/null || \
+            cp arm64/HachiTune.app/Contents/Frameworks/libonnxruntime*.dylib universal/HachiTune.app/Contents/Frameworks/
+          fi
+          
+          # Merge VST3 plugin
+          if [ -d "arm64/HachiTune.vst3" ]; then
+            cp -R arm64/HachiTune.vst3 universal/
+            lipo -create \
+              arm64/HachiTune.vst3/Contents/MacOS/HachiTune \
+              x64/HachiTune.vst3/Contents/MacOS/HachiTune \
+              -output universal/HachiTune.vst3/Contents/MacOS/HachiTune
+            
+            if [ -f "arm64/HachiTune.vst3/Contents/Frameworks/libonnxruntime.dylib" ]; then
+              lipo -create \
+                arm64/HachiTune.vst3/Contents/Frameworks/libonnxruntime*.dylib \
+                x64/HachiTune.vst3/Contents/Frameworks/libonnxruntime*.dylib \
+                -output universal/HachiTune.vst3/Contents/Frameworks/libonnxruntime.dylib 2>/dev/null || \
+              cp arm64/HachiTune.vst3/Contents/Frameworks/libonnxruntime*.dylib universal/HachiTune.vst3/Contents/Frameworks/
+            fi
+          fi
+          
+          # Merge AU plugin
+          if [ -d "arm64/HachiTune.component" ]; then
+            cp -R arm64/HachiTune.component universal/
+            lipo -create \
+              arm64/HachiTune.component/Contents/MacOS/HachiTune \
+              x64/HachiTune.component/Contents/MacOS/HachiTune \
+              -output universal/HachiTune.component/Contents/MacOS/HachiTune
+            
+            if [ -f "arm64/HachiTune.component/Contents/Frameworks/libonnxruntime.dylib" ]; then
+              lipo -create \
+                arm64/HachiTune.component/Contents/Frameworks/libonnxruntime*.dylib \
+                x64/HachiTune.component/Contents/Frameworks/libonnxruntime*.dylib \
+                -output universal/HachiTune.component/Contents/Frameworks/libonnxruntime.dylib 2>/dev/null || \
+              cp arm64/HachiTune.component/Contents/Frameworks/libonnxruntime*.dylib universal/HachiTune.component/Contents/Frameworks/
+            fi
+          fi
+
+      - name: Ad-hoc Code Sign
+        run: |
+          codesign --force --deep -s - universal/HachiTune.app || true
+          codesign --force --deep -s - universal/HachiTune.vst3 || true
+          codesign --force --deep -s - universal/HachiTune.component || true
+
+      - name: Verify Universal Binaries
+        run: |
+          echo "=== HachiTune.app ==="
+          lipo -info universal/HachiTune.app/Contents/MacOS/HachiTune
+          
+          if [ -d "universal/HachiTune.vst3" ]; then
+            echo "=== HachiTune.vst3 ==="
+            lipo -info universal/HachiTune.vst3/Contents/MacOS/HachiTune
+          fi
+          
+          if [ -d "universal/HachiTune.component" ]; then
+            echo "=== HachiTune.component ==="
+            lipo -info universal/HachiTune.component/Contents/MacOS/HachiTune
+          fi
+
       - name: Create DMG
         run: |
           hdiutil create -volname "HachiTune" \
-            -srcfolder package \
+            -srcfolder universal \
             -ov -format UDZO \
             HachiTune-macOS.dmg
 
@@ -225,7 +390,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: HachiTune-macOS-Unpacked
-          path: package/
+          path: universal/
           retention-days: 30
 
   # ===========================================
@@ -249,6 +414,7 @@ jobs:
             cmake \
             ninja-build \
             pkg-config \
+            gobjc++ \
             libasound2-dev \
             libjack-jackd2-dev \
             libfreetype6-dev \
@@ -329,6 +495,7 @@ jobs:
             cmake \
             ninja-build \
             pkg-config \
+            gobjc++ \
             libasound2-dev \
             libjack-jackd2-dev \
             libfreetype6-dev \
@@ -397,7 +564,7 @@ jobs:
       - build-windows-cpu
       - build-windows-directml
       - build-windows-cuda
-      - build-macos
+      - build-macos-universal
       - build-linux
       - build-linux-gpu
     runs-on: ubuntu-latest
