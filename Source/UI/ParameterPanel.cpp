@@ -84,11 +84,8 @@ void ParameterPanel::setupSlider(juce::Slider& slider, juce::Label& label,
 
 void ParameterPanel::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xFF1E1E28));
-    
-    // Left border
-    g.setColour(juce::Colour(0xFF3D3D47));
-    g.drawVerticalLine(0, 0, static_cast<float>(getHeight()));
+    // Don't fill background - let parent DraggablePanel handle it
+    juce::ignoreUnused(g);
 }
 
 void ParameterPanel::resized()

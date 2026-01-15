@@ -21,6 +21,7 @@
 #include "PianoRollComponent.h"
 #include "SettingsComponent.h"
 #include "ToolbarComponent.h"
+#include "Workspace/WorkspaceComponent.h"
 
 #include <atomic>
 #include <thread>
@@ -131,6 +132,7 @@ private:
   CustomMenuBarLookAndFeel menuBarLookAndFeel;
   juce::MenuBarComponent menuBar;
   ToolbarComponent toolbar;
+  WorkspaceComponent workspace;
   PianoRollComponent pianoRoll;
   ParameterPanel parameterPanel;
 

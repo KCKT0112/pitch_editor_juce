@@ -14,10 +14,10 @@ class ParameterPanel : public juce::Component,
 public:
     ParameterPanel();
     ~ParameterPanel() override;
-    
+
     void paint(juce::Graphics& g) override;
     void resized() override;
-    
+
     void sliderValueChanged(juce::Slider* slider) override;
     void sliderDragEnded(juce::Slider* slider) override;
     void buttonClicked(juce::Button* button) override;
@@ -26,7 +26,9 @@ public:
     void setSelectedNote(Note* note);
     void updateFromNote();
     void updateGlobalSliders();
-    
+
+    int getPreferredHeight() const { return 500; }
+
     std::function<void()> onParameterChanged;
     std::function<void()> onParameterEditFinished;  // Called when slider drag ends
     std::function<void()> onGlobalPitchChanged;

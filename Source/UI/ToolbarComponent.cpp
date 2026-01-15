@@ -153,78 +153,82 @@ void ToolbarComponent::paint(juce::Graphics& g)
         g.setColour(juce::Colour(COLOR_PRIMARY));
         g.fillRoundedRectangle(araModeLabel.getBounds().toFloat(), 8.0f);
     }
-
-    // Bottom border
-    g.setColour(juce::Colour(0xFF3D3D47));
-    g.drawHorizontalLine(getHeight() - 1, 0, static_cast<float>(getWidth()));
 }
 
 void ToolbarComponent::resized()
 {
     auto bounds = getLocalBounds().reduced(8, 4);
 
-    // Playback controls (or plugin mode buttons)
-    if (pluginMode)
-    {
-        araModeLabel.setBounds(bounds.removeFromLeft(90));
-        bounds.removeFromLeft(8);
-        reanalyzeButton.setBounds(bounds.removeFromLeft(100));
-    }
-    else
-    {
-        playButton.setBounds(bounds.removeFromLeft(28));
-        bounds.removeFromLeft(4);
-        stopButton.setBounds(bounds.removeFromLeft(28));
-        bounds.removeFromLeft(8);
-        goToStartButton.setBounds(bounds.removeFromLeft(28));
-        bounds.removeFromLeft(4);
-        goToEndButton.setBounds(bounds.removeFromLeft(28));
-    }
-    bounds.removeFromLeft(20);
-
-    // Edit mode buttons in a container (4 buttons: select, draw, split, follow)
+    // Calculate center section width for centering
     const int toolButtonSize = 32;
     const int toolContainerPadding = 4;
-    const int numToolButtons = pluginMode ? 3 : 4;  // Hide follow in plugin mode
+    const int numToolButtons = pluginMode ? 3 : 4;
     const int toolContainerWidth = toolButtonSize * numToolButtons + toolContainerPadding * 2;
-    toolContainerBounds = bounds.removeFromLeft(toolContainerWidth).reduced(0, 2);
+    const int playbackWidth = pluginMode ? 200 : 120;
+    const int timeWidth = 160;
+    const int centerGap = 16;
+    const int centerTotalWidth = playbackWidth + centerGap + toolContainerWidth + centerGap + timeWidth;
 
-    auto toolArea = toolContainerBounds.reduced(toolContainerPadding, toolContainerPadding);
-    selectModeButton.setBounds(toolArea.removeFromLeft(toolButtonSize));
-    drawModeButton.setBounds(toolArea.removeFromLeft(toolButtonSize));
-    splitModeButton.setBounds(toolArea.removeFromLeft(toolButtonSize));
-    if (!pluginMode)
-        followButton.setBounds(toolArea.removeFromLeft(toolButtonSize));
-
-    bounds.removeFromLeft(20);
-
-    // Time display with padding for rounded background (same height as tool container)
-    auto timeBounds = bounds.removeFromLeft(160).reduced(0, 2);
-    timeLabel.setBounds(timeBounds);
-    bounds.removeFromLeft(20);
-
-    // Right side - zoom (slider on right, label before it)
-    zoomSlider.setBounds(bounds.removeFromRight(150));
-    bounds.removeFromRight(4);
-    zoomLabel.setBounds(bounds.removeFromRight(50));
-
-    // Status label (shown when not showing progress)
+    // Right side - status/progress
+    auto rightBounds = bounds.removeFromRight(200);
     if (showingStatus && !showingProgress)
     {
-        statusLabel.setBounds(bounds.removeFromLeft(120));
-        bounds.removeFromLeft(10);
+        statusLabel.setBounds(rightBounds.removeFromLeft(120));
     }
-    
-    // Progress bar (use the remaining middle area so it won't cover buttons)
     if (showingProgress)
     {
-        auto progressArea = bounds.withWidth(std::min(300, bounds.getWidth()));
-
-        // Vertical layout: status text above, progress bar below
+        auto progressArea = rightBounds.withWidth(std::min(180, rightBounds.getWidth()));
         const int progressBarHeight = progressArea.getHeight() / 2;
         progressLabel.setBounds(progressArea.removeFromTop(progressArea.getHeight() - progressBarHeight));
         progressBar.setBounds(progressArea.withHeight(progressBarHeight));
     }
+
+    // Hide zoom controls
+    zoomLabel.setVisible(false);
+    zoomSlider.setVisible(false);
+
+    // Center section - calculate starting X for centering
+    int centerStartX = (getWidth() - centerTotalWidth) / 2;
+    int currentX = centerStartX;
+
+    // Playback controls (or plugin mode buttons) - centered
+    if (pluginMode)
+    {
+        araModeLabel.setBounds(currentX, bounds.getY(), 90, bounds.getHeight());
+        currentX += 98;
+        reanalyzeButton.setBounds(currentX, bounds.getY(), 100, bounds.getHeight());
+        currentX += 100;
+    }
+    else
+    {
+        goToStartButton.setBounds(currentX, bounds.getY() + 4, 28, bounds.getHeight() - 8);
+        currentX += 32;
+        playButton.setBounds(currentX, bounds.getY() + 4, 28, bounds.getHeight() - 8);
+        currentX += 32;
+        stopButton.setBounds(currentX, bounds.getY() + 4, 28, bounds.getHeight() - 8);
+        currentX += 32;
+        goToEndButton.setBounds(currentX, bounds.getY() + 4, 28, bounds.getHeight() - 8);
+        currentX += 28;
+    }
+    currentX += centerGap;
+
+    // Edit mode buttons in a container - centered
+    toolContainerBounds = juce::Rectangle<int>(currentX, bounds.getY() + 2, toolContainerWidth, bounds.getHeight() - 4);
+    auto toolArea = toolContainerBounds.reduced(toolContainerPadding, toolContainerPadding);
+    int toolX = toolArea.getX();
+    selectModeButton.setBounds(toolX, toolArea.getY(), toolButtonSize, toolArea.getHeight());
+    toolX += toolButtonSize;
+    drawModeButton.setBounds(toolX, toolArea.getY(), toolButtonSize, toolArea.getHeight());
+    toolX += toolButtonSize;
+    splitModeButton.setBounds(toolX, toolArea.getY(), toolButtonSize, toolArea.getHeight());
+    toolX += toolButtonSize;
+    if (!pluginMode)
+        followButton.setBounds(toolX, toolArea.getY(), toolButtonSize, toolArea.getHeight());
+
+    currentX += toolContainerWidth + centerGap;
+
+    // Time display - centered
+    timeLabel.setBounds(currentX, bounds.getY() + 2, timeWidth, bounds.getHeight() - 4);
 }
 
 void ToolbarComponent::buttonClicked(juce::Button* button)

@@ -84,6 +84,12 @@ PianoRollComponent::~PianoRollComponent() {
 }
 
 void PianoRollComponent::paint(juce::Graphics &g) {
+  // Apply rounded corner clipping
+  const float cornerRadius = 8.0f;
+  juce::Path clipPath;
+  clipPath.addRoundedRectangle(getLocalBounds().toFloat(), cornerRadius);
+  g.reduceClipRegion(clipPath);
+
   // Background
   g.fillAll(juce::Colour(COLOR_BACKGROUND));
 

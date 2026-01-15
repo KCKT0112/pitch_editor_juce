@@ -37,4 +37,20 @@ namespace SvgUtils
             tintDrawable(svg.get(), tintColour);
         return svg;
     }
+
+    std::unique_ptr<juce::Drawable> createDrawableFromSvg(const juce::String& svgString)
+    {
+        auto xml = juce::XmlDocument::parse(svgString);
+        if (xml != nullptr)
+            return juce::Drawable::createFromSVG(*xml);
+        return nullptr;
+    }
+
+    std::unique_ptr<juce::Drawable> createDrawableFromSvg(const juce::String& svgString, juce::Colour tintColour)
+    {
+        auto svg = createDrawableFromSvg(svgString);
+        if (svg)
+            tintDrawable(svg.get(), tintColour);
+        return svg;
+    }
 }
